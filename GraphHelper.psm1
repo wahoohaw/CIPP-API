@@ -26,7 +26,8 @@ function Get-NormalizedError {
         '*AADSTS50020*' { 'AADSTS50020: The user you have used for your Secure Application Model is a guest in this tenant, or your are using GDAP and have not added the user to the correct group. Please delete the guest user to gain access to this tenant' }
         '*invalid or malformed*' { 'The request is malformed. You have entered incorrect tokens or have not performed a clear of the token cache after entering new tokens. Please see the troubleshooting documentation on how to execute a clear of the token cache.' }
         '*Windows Store repository apps feature is not supported for this tenant*' { 'This tenant does not have WinGet support available' }
-        '*AADSTS650051*' {'The application does not exist yet. Try again in 30 seconds.' }
+        '*AADSTS650051*' { 'The application does not exist yet. Try again in 30 seconds.' }
+        '*AppLifecycle_2210*' { 'Failed to call Intune APIs: Does the tenant have a license available?' }
         Default { $message }
         
     }
@@ -40,8 +41,7 @@ function Get-GraphToken($tenantid, $scope, $AsApp, $AppID, $refreshToken, $Retur
         client_secret = $env:ApplicationSecret
         scope         = $Scope
         refresh_token = $env:RefreshToken
-        grant_type    = 'refresh_token'
-                    
+        grant_type    = 'refresh_token'             
     }
     if ($asApp -eq $true) {
         $AuthBody = @{
@@ -135,7 +135,8 @@ function New-GraphGetRequest {
     ) 
 
     if ($scope -eq 'ExchangeOnline') { 
-        $Headers = Get-GraphToken -AppID 'a0c73c16-a7e3-4564-9a95-2bdf47383716' -RefreshToken $env:ExchangeRefreshToken -Scope 'https://outlook.office365.com/.default' -Tenantid $tenantid
+        $AccessToken = Get-ClassicAPIToken -resource 'https://outlook.office365.com' -Tenantid $tenantid
+        $headers = @{ Authorization = "Bearer $($AccessToken.access_token)" }
     }
     else {
         $headers = Get-GraphToken -tenantid $tenantid -scope $scope -AsApp $asapp
@@ -219,8 +220,16 @@ function convert-skuname($skuname, $skuID) {
 }
 
 function Get-ClassicAPIToken($tenantID, $Resource) {
+    Write-Host "Using classic"
     $uri = "https://login.microsoftonline.com/$($TenantID)/oauth2/token"
-    $body = "resource=$Resource&grant_type=refresh_token&refresh_token=$($env:ExchangeRefreshToken)"
+    $Body = @{
+        client_id     = $env:ApplicationID
+        client_secret = $env:ApplicationSecret
+        resource      = $Resource
+        refresh_token = $env:RefreshToken
+        grant_type    = 'refresh_token'
+                    
+    }
 
     try {
         $token = Invoke-RestMethod $uri -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction SilentlyContinue -Method post
@@ -314,11 +323,13 @@ function New-ClassicAPIPostRequest($TenantID, $Uri, $Method = 'POST', $Resource 
     if ((Get-AuthorisedRequest -Uri $uri -TenantID $tenantid)) {
         try {
             $ReturnedData = Invoke-RestMethod -ContentType 'application/json;charset=UTF-8' -Uri $Uri -Method $Method -Body $Body -Headers @{
-                Authorization            = "Bearer $($token.access_token)";
-                'x-ms-client-request-id' = [guid]::NewGuid().ToString();
-                'x-ms-client-session-id' = [guid]::NewGuid().ToString()
-                'x-ms-correlation-id'    = [guid]::NewGuid()
-                'X-Requested-With'       = 'XMLHttpRequest' 
+                Authorization                  = "Bearer $($token.access_token)";
+                'x-ms-client-request-id'       = [guid]::NewGuid().ToString();
+                'x-ms-client-session-id'       = [guid]::NewGuid().ToString()
+                'x-ms-correlation-id'          = [guid]::NewGuid()
+                'X-Requested-With'             = 'XMLHttpRequest' 
+                'X-RequestForceAuthentication' = $true
+
             } 
                        
         }
@@ -455,7 +466,7 @@ function Remove-CIPPCache {
     }
 }
 
-function New-ExoRequest ($tenantid, $cmdlet, $cmdParams) {
+function New-ExoRequest ($tenantid, $cmdlet, $cmdParams, $useSystemMailbox, $Anchor) {
     $token = Get-ClassicAPIToken -resource 'https://outlook.office365.com' -Tenantid $tenantid 
     if ((Get-AuthorisedRequest -TenantID $tenantid)) {
         $tenant = (get-tenants | Where-Object -Property defaultDomainName -EQ $tenantid).customerId
@@ -471,10 +482,22 @@ function New-ExoRequest ($tenantid, $cmdlet, $cmdParams) {
                 Parameters = $Params
             }
         } 
-        $OnMicrosoft = (New-GraphGetRequest -uri 'https://graph.microsoft.com/beta/domains?$top=999' -tenantid $tenantid | Where-Object -Property isInitial -EQ $true).id
+        if (!$Anchor) {
+            if ($cmdparams.Identity) { $Anchor = $cmdparams.Identity } 
+            if ($cmdparams.anr) { $Anchor = $cmdparams.anr } 
+            if ($cmdparams.User) { $Anchor = $cmdparams.User } 
+        
+            if (!$Anchor -or $useSystemMailbox) {
+                $OnMicrosoft = (New-GraphGetRequest -uri 'https://graph.microsoft.com/beta/domains?$top=999' -tenantid $tenantid | Where-Object -Property isInitial -EQ $true).id
+                $anchor = "UPN:SystemMailbox{bb558c35-97f1-4cb9-8ff7-d53741dc928c}@$($OnMicrosoft)"
+            
+            }
+        }
+        Write-Host "Using $Anchor"
         $Headers = @{ 
             Authorization     = "Bearer $($token.access_token)" 
-            'X-AnchorMailbox' = "UPN:SystemMailbox{bb558c35-97f1-4cb9-8ff7-d53741dc928c}@$($OnMicrosoft)"
+            Prefer            = "odata.maxpagesize = 1000"
+            'X-AnchorMailbox' = $anchor
 
         }
         try {
