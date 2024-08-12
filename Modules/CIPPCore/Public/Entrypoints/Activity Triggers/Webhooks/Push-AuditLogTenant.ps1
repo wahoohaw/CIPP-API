@@ -7,9 +7,17 @@ function Push-AuditLogTenant {
     $WebhookTable = Get-CippTable -tablename 'webhookTable'
     $Webhooks = Get-CIPPAzDataTableEntity @WebhookTable -Filter "PartitionKey eq '$($Item.TenantFilter)' and Version eq '3'" | Where-Object { $_.Resource -match '^Audit' }
     $ExistingBundles = Get-CIPPAzDataTableEntity @AuditBundleTable -Filter "PartitionKey eq '$($Item.TenantFilter)' and ContentType eq '$ContentType'"
+    $ConfigTable = Get-CIPPTable -TableName 'WebhookRules'
+    $ConfigEntries = Get-CIPPAzDataTableEntity @ConfigTable
 
     $NewBundles = [System.Collections.Generic.List[object]]::new()
     foreach ($Webhook in $Webhooks) {
+        # only process webhooks that are configured in the webhookrules table
+        $Configuration = $ConfigEntries | Where-Object { ($_.Tenants -match $TenantFilter -or $_.Tenants -match 'AllTenants') }
+        if ($Configuration.Type -notcontains $Webhook.Resource) {
+            continue
+        }
+
         $TenantFilter = $Webhook.PartitionKey
         $LogType = $Webhook.Resource
         Write-Information "Querying for $LogType on $TenantFilter"
@@ -41,7 +49,7 @@ function Push-AuditLogTenant {
     }
 
     if (($NewBundles | Measure-Object).Count -gt 0) {
-        Add-CIPPAzDataTableEntity @AuditBundleTable -Entity $NewBundles
+        Add-CIPPAzDataTableEntity @AuditBundleTable -Entity $NewBundles -Force
         Write-Information ($NewBundles | ConvertTo-Json -Depth 5 -Compress)
 
         $Batch = $NewBundles | Select-Object @{Name = 'ContentId'; Expression = { $_.RowKey } }, @{Name = 'TenantFilter'; Expression = { $_.PartitionKey } }, @{Name = 'FunctionName'; Expression = { 'AuditLogBundleProcessing' } }
