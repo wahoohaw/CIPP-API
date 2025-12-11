@@ -1,5 +1,3 @@
-using namespace System.Net
-
 Function Invoke-EditPolicy {
     <#
     .FUNCTIONALITY
@@ -10,10 +8,9 @@ Function Invoke-EditPolicy {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $APIName = $Request.Params.CIPPEndpoint
-    $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
+    # Note, suspect this is deprecated - rvdwegen
 
+    $APIName = $Request.Params.CIPPEndpoint
     $Tenant = $request.body.tenantid
     $ID = $request.body.groupid
     $displayname = $request.body.Displayname
@@ -39,8 +36,7 @@ Function Invoke-EditPolicy {
 
     $body = [pscustomobject]@{'Results' = $results }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $body
         })

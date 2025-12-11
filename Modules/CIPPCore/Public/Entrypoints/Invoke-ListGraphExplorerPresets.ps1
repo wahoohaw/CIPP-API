@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ListGraphExplorerPresets {
+function Invoke-ListGraphExplorerPresets {
     <#
     .FUNCTIONALITY
         Entrypoint,AnyTenant
@@ -9,24 +7,22 @@ Function Invoke-ListGraphExplorerPresets {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
-
-    $APIName = $Request.Params.CIPPEndpoint
     $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
 
-    # Interact with query parameters or the body of the request.
-    $Username = $Request.Headers['x-ms-client-principal-name']
+
+    $Username = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Headers.'x-ms-client-principal')) | ConvertFrom-Json).userDetails
 
     try {
         $Table = Get-CIPPTable -TableName 'GraphPresets'
-        $Presets = Get-CIPPAzDataTableEntity @Table -Filter "Owner eq '$Username' or IsShared eq true" | Sort-Object -Property name
+        $Presets = Get-CIPPAzDataTableEntity @Table | Where-Object { $Username -eq $_.Owner -or $_.IsShared -eq $true } | Sort-Object -Property name
         $Results = foreach ($Preset in $Presets) {
             [PSCustomObject]@{
                 id         = $Preset.Id
                 name       = $Preset.name
                 IsShared   = $Preset.IsShared
                 IsMyPreset = $Preset.Owner -eq $Username
-                params     = ConvertFrom-Json -InputObject $Preset.Params
+                Owner      = $Preset.Owner
+                params     = (ConvertFrom-Json -InputObject $Preset.Params)
             }
         }
 
@@ -35,10 +31,11 @@ Function Invoke-ListGraphExplorerPresets {
             $Results = $Results | Where-Object { ($_.params.endpoint -replace '^/', '') -eq $Endpoint }
         }
     } catch {
+        Write-Warning "Could not list presets. $($_.Exception.Message)"
+        Write-Information $_.InvocationInfo.PositionMessage
         $Results = @()
     }
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = @{
                 Results  = @($Results)

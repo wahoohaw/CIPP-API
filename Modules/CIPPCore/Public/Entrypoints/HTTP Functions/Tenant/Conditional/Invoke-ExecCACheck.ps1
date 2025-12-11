@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ExecCaCheck {
+function Invoke-ExecCaCheck {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -9,11 +7,6 @@ Function Invoke-ExecCaCheck {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
-
-    $APIName = $Request.Params.CIPPEndpoint
-    $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
-
     $Tenant = $Request.Body.tenantFilter
     $UserID = $Request.Body.userID.value
     if ($Request.Body.IncludeApplications.value) {
@@ -23,18 +16,18 @@ Function Invoke-ExecCaCheck {
     }
     $results = try {
         $CAContext = @{
-            '@odata.type'         = '#microsoft.graph.whatIfApplicationContext'
+            '@odata.type'         = '#microsoft.graph.applicationContext'
             'includeApplications' = @($IncludeApplications)
         }
         $ConditionalAccessWhatIfDefinition = @{
-            'conditionalAccessWhatIfSubject'    = @{
-                '@odata.type' = '#microsoft.graph.userSubject'
+            'signInIdentity'   = @{
+                '@odata.type' = '#microsoft.graph.userSignIn'
                 'userId'      = "$userId"
             }
-            'conditionalAccessContext'          = $CAContext
-            'conditionalAccessWhatIfConditions' = @{}
+            'signInContext'    = $CAContext
+            'signInConditions' = @{}
         }
-        $whatIfConditions = $ConditionalAccessWhatIfDefinition.conditionalAccessWhatIfConditions
+        $whatIfConditions = $ConditionalAccessWhatIfDefinition.signInConditions
         if ($Request.body.UserRiskLevel) { $whatIfConditions.userRiskLevel = $Request.body.UserRiskLevel.value }
         if ($Request.body.SignInRiskLevel) { $whatIfConditions.signInRiskLevel = $Request.body.SignInRiskLevel.value }
         if ($Request.body.ClientAppType) { $whatIfConditions.clientAppType = $Request.body.ClientAppType.value }
@@ -52,8 +45,7 @@ Function Invoke-ExecCaCheck {
 
     $body = [pscustomobject]@{'Results' = $results }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $body
         })

@@ -13,6 +13,11 @@ function Invoke-CIPPStandardDisableSMS {
         CAT
             Entra (AAD) Standards
         TAG
+            "CIS M365 5.0 (2.3.5)"
+            "EIDSCA.AS04"
+            "NIST CSF 2.0 (PR.AA-03)"
+        EXECUTIVETEXT
+            Disables SMS text messages as a multi-factor authentication method due to security vulnerabilities like SIM swapping attacks. This forces users to adopt more secure authentication methods like authenticator apps or hardware tokens, significantly improving account security.
         ADDEDCOMPONENT
         IMPACT
             High Impact
@@ -25,13 +30,20 @@ function Invoke-CIPPStandardDisableSMS {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#high-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
     ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'DisableSMS'
 
-    $CurrentState = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/SMS' -tenantid $Tenant
+    try {
+        $CurrentState = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/SMS' -tenantid $Tenant
+    }
+    catch {
+        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get the DisableSMS state for $Tenant. Error: $ErrorMessage" -Sev Error
+        return
+    }
     $StateIsCorrect = ($CurrentState.state -eq 'disabled')
 
     If ($Settings.remediate -eq $true) {

@@ -13,6 +13,8 @@ function Invoke-CIPPStandardDelegateSentItems {
         CAT
             Exchange Standards
         TAG
+        EXECUTIVETEXT
+            Ensures emails sent from shared mailboxes (like info@company.com) are stored in the shared mailbox rather than the individual sender's mailbox. This maintains complete email threads in one location, improving collaboration and ensuring all team members can see the full conversation history.
         ADDEDCOMPONENT
             {"type":"switch","label":"Include user mailboxes","name":"standards.DelegateSentItems.IncludeUserMailboxes"}
         IMPACT
@@ -25,10 +27,16 @@ function Invoke-CIPPStandardDelegateSentItems {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/exchange-standards#medium-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
+    $TestResult = Test-CIPPStandardLicense -StandardName 'DelegateSentItems' -TenantFilter $Tenant -RequiredCapabilities @('EXCHANGE_S_STANDARD', 'EXCHANGE_S_ENTERPRISE', 'EXCHANGE_S_STANDARD_GOV', 'EXCHANGE_S_ENTERPRISE_GOV', 'EXCHANGE_LITE') #No Foundation because that does not allow powershell access
+
+    if ($TestResult -eq $false) {
+        Write-Host "We're exiting as the correct license is not present for this standard."
+        return $true
+    } #we're done.
     #$Rerun -Type Standard -Tenant $Tenant -API 'DelegateSentItems' -Settings $Settings
 
 

@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ListSites {
+function Invoke-ListSites {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -9,25 +7,25 @@ Function Invoke-ListSites {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
+    $Headers = $Request.Headers
+
 
     $TenantFilter = $Request.Query.TenantFilter
-    $Type = $request.query.Type
-    $UserUPN = $request.query.UserUPN
+    $Type = $Request.Query.Type
+    $UserUPN = $Request.Query.UserUPN
 
     if (!$TenantFilter) {
-        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+        return ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::BadRequest
                 Body       = 'TenantFilter is required'
             })
-        return
     }
 
     if (!$Type) {
-        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+        return ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::BadRequest
                 Body       = 'Type is required'
             })
-        return
     }
 
     $Tenant = Get-Tenants -TenantFilter $TenantFilter
@@ -93,7 +91,7 @@ Function Invoke-ListSites {
             try {
                 $Requests = (New-GraphBulkRequest -tenantid $TenantFilter -scope 'https://graph.microsoft.com/.default' -Requests @($Requests) -asapp $true).body.value | Where-Object { $_.list.template -eq 'DocumentLibrary' }
             } catch {
-                Write-LogMessage -Message "Error getting auto map urls: $($_.Exception.Message)" -Sev 'Error' -tenant $TenantFilter -API 'ListSites' -LogData (Get-CippException -Exception $_)
+                Write-LogMessage -Headers $Headers -Message "Error getting auto map urls: $($_.Exception.Message)" -Sev 'Error' -tenant $TenantFilter -API 'ListSites' -LogData (Get-CippException -Exception $_)
             }
             $GraphRequest = foreach ($Site in $GraphRequest) {
                 $ListId = ($Requests | Where-Object { $_.parentReference.siteId -like "*$($Site.siteId)*" }).id
@@ -112,8 +110,7 @@ Function Invoke-ListSites {
         $GraphRequest = $GraphRequest | Where-Object { $null -ne $_.webUrl }
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = $StatusCode
             Body       = @($GraphRequest | Sort-Object -Property displayName)
         })

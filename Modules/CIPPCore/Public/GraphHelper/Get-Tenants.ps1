@@ -1,8 +1,10 @@
+
 function Get-Tenants {
     <#
     .FUNCTIONALITY
     Internal
     #>
+    [CmdletBinding(DefaultParameterSetName = 'Standard')]
     param (
         [Parameter( ParameterSetName = 'Skip', Mandatory = $True )]
         [switch]$SkipList,
@@ -39,8 +41,8 @@ function Get-Tenants {
             $IncludedTenantFilter = [scriptblock]::Create("`$_.customerId -eq '$TenantFilter'")
             $RelationshipFilter = " and customer/tenantId eq '$TenantFilter'"
         } else {
-            $Filter = "{0} and defaultDomainName eq '{1}'" -f $Filter, $TenantFilter
-            $IncludedTenantFilter = [scriptblock]::Create("`$_.defaultDomainName -eq '$TenantFilter'")
+            $Filter = "{0} and defaultDomainName eq '{1}' or initialDomainName eq '{1}'" -f $Filter, $TenantFilter
+            $IncludedTenantFilter = [scriptblock]::Create("`$_.defaultDomainName -eq '$TenantFilter' -or `$_.initialDomainName -eq '$TenantFilter'")
             $RelationshipFilter = ''
         }
     } else {
@@ -55,7 +57,19 @@ function Get-Tenants {
     }
 
     if ($CleanOld.IsPresent) {
-        $GDAPRelationships = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/tenantRelationships/delegatedAdminRelationships?`$filter=status eq 'active' and not startsWith(displayName,'MLT_')&`$select=customer,autoExtendDuration,endDateTime&`$top=300" -NoAuthCheck:$true
+        try {
+            $GDAPRelationships = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/tenantRelationships/delegatedAdminRelationships?`$filter=status eq 'active'&`$select=customer,autoExtendDuration,endDateTime" -NoAuthCheck:$true
+            # Filter out MLT relationships locally
+            $GDAPRelationships = $GDAPRelationships | Where-Object { $_.displayName -notlike 'MLT_*' }
+            if (!$GDAPRelationships) {
+                Write-LogMessage -API 'Get-Tenants' -message 'Tried cleaning old tenants but failed to get GDAP relationships - No relationships returned' -Sev 'Critical'
+                throw 'Failed to get GDAP relationships for cleaning old tenants.'
+            }
+        } catch {
+            $ErrorMessage = Get-CippException -Exception $_
+            Write-LogMessage -API 'Get-Tenants' -message "Tried cleaning old tenants but failed to get GDAP relationships - $($_.Exception.Message)" -Sev 'Critical' -LogData $ErrorMessage
+            throw $_
+        }
         $GDAPList = foreach ($Relationship in $GDAPRelationships) {
             [PSCustomObject]@{
                 customerId      = $Relationship.customer.tenantId
@@ -64,7 +78,7 @@ function Get-Tenants {
                 relationshipEnd = $Relationship.endDateTime
             }
         }
-        $CurrentTenants = Get-CIPPAzDataTableEntity @TenantsTable -Filter "PartitionKey eq 'Tenants' and Excluded eq false"
+        $CurrentTenants = Get-CIPPAzDataTableEntity @TenantsTable -Filter "PartitionKey eq 'Tenants' and Excluded eq false and delegatedPrivilegeStatus ne 'directTenant'"
         $CurrentTenants | Where-Object { $_.customerId -notin $GDAPList.customerId -and $_.customerId -ne $env:TenantID } | ForEach-Object {
             Remove-AzDataTableEntity -Force @TenantsTable -Entity $_
         }
@@ -75,10 +89,17 @@ function Get-Tenants {
     if (($BuildRequired -or $TriggerRefresh.IsPresent) -and $PartnerTenantState.state -ne 'owntenant') {
         # Get TenantProperties table
         $PropertiesTable = Get-CippTable -TableName 'TenantProperties'
-        $Aliases = Get-CIPPAzDataTableEntity @PropertiesTable -Filter "RowKey eq 'Alias'"
-
+        if (!$env:RefreshToken) {
+            throw 'RefreshToken not set. Cannot get tenant list.'
+        }
         #get the full list of tenants
-        $GDAPRelationships = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/tenantRelationships/delegatedAdminRelationships?`$filter=status eq 'active' and not startsWith(displayName,'MLT_')$RelationshipFilter&`$select=customer,autoExtendDuration,endDateTime&`$top=300" -NoAuthCheck:$true
+        $GDAPRelationships = New-GraphGetRequest -uri "https://graph.microsoft.com/v1.0/tenantRelationships/delegatedAdminRelationships?`$filter=status eq 'active'$RelationshipFilter&`$select=customer,autoExtendDuration,endDateTime" -NoAuthCheck:$true
+        # Filter out MLT relationships locally
+        $GDAPRelationships = $GDAPRelationships | Where-Object { $_.displayName -notlike 'MLT_*' }
+        Write-Host "GDAP relationships found: $($GDAPRelationships.Count)"
+        Write-Information "GDAP relationships found: $($GDAPRelationships.Count)"
+        $totalTenants = $GDAPRelationships.customer.tenantId | Select-Object -Unique
+        Write-Information "Total tenants found in relationships result: $($totalTenants.count)"
         $GDAPList = foreach ($Relationship in $GDAPRelationships) {
             [PSCustomObject]@{
                 customerId      = $Relationship.customer.tenantId
@@ -95,7 +116,11 @@ function Get-Tenants {
             # Write-Host "Processing $($_.Name), $($_.displayName) to add to tenant list."
             $ExistingTenantInfo = Get-CIPPAzDataTableEntity @TenantsTable -Filter "PartitionKey eq 'Tenants' and RowKey eq '$($_.Name)'"
 
-            $Alias = ($Aliases | Where-Object { $_.PartitionKey -eq $_.Name }).Value
+            $Alias = (Get-AzDataTableEntity @PropertiesTable -Filter "PartitionKey eq '$($_.Name)' and RowKey eq 'Alias'").Value
+
+            if ($Alias) {
+                Write-Host "Alias found for $($_.Name) - $Alias."
+            }
 
             if ($TriggerRefresh.IsPresent -and $ExistingTenantInfo.customerId) {
                 # Reset error count
@@ -104,8 +129,29 @@ function Get-Tenants {
                 Add-CIPPAzDataTableEntity @TenantsTable -Entity $ExistingTenantInfo -Force | Out-Null
             }
 
-            if ($ExistingTenantInfo -and $ExistingTenantInfo.RequiresRefresh -eq $false -and $ExistingTenantInfo.displayName -eq $LatestRelationship.displayName) {
+            if ($ExistingTenantInfo -and $ExistingTenantInfo.RequiresRefresh -eq $false -and ($ExistingTenantInfo.displayName -eq $LatestRelationship.displayName -or $ExistingTenantInfo.displayName -eq $Alias)) {
                 Write-Host 'Existing tenant found. We already have it cached, skipping.'
+
+                $DisplayNameUpdated = $false
+                if (![string]::IsNullOrEmpty($Alias)) {
+                    if ($Alias -ne $ExistingTenantInfo.displayName) {
+                        Write-Host "Alias found for $($_.Name)."
+                        $ExistingTenantInfo.displayName = $Alias
+                        $DisplayNameUpdated = $true
+                    }
+                } else {
+                    if ($LatestRelationship.displayName -ne $ExistingTenantInfo.displayName) {
+                        Write-Host 'Display name changed from relationship, updating.'
+                        $ExistingTenantInfo.displayName = $LatestRelationship.displayName
+                        $DisplayNameUpdated = $true
+                    }
+                }
+
+                if ($DisplayNameUpdated) {
+                    $ExistingTenantInfo.displayName = $LatestRelationship.displayName
+                    Add-CIPPAzDataTableEntity @TenantsTable -Entity $ExistingTenantInfo -Force | Out-Null
+                }
+
                 $ExistingTenantInfo
                 return
             }
@@ -136,9 +182,9 @@ function Get-Tenants {
                 }
                 Write-Host 'finished getting domain'
 
-                if ($Aliases.PartitionKey -contains $_.Name -and ![string]::IsNullOrEmpty($Alias)) {
-                    $Alias = $Aliases | Where-Object { $_.PartitionKey -eq $_.Name }
-                    $displayName = $Alias.Value
+                if (![string]::IsNullOrEmpty($Alias)) {
+                    Write-Information "Setting display name to $Alias."
+                    $displayName = $Alias
                 } else {
                     $displayName = $LatestRelationship.displayName
                 }
@@ -228,5 +274,11 @@ function Get-Tenants {
             Add-CIPPAzDataTableEntity @TenantsTable -Entity $IncludedTenantsCache -Force | Out-Null
         }
     }
+
+    # Limit tenant list to allowed tenants if set in script scope from New-CippCoreRequest
+    if ($script:AllowedTenants) {
+        $IncludedTenantsCache = $IncludedTenantsCache | Where-Object { $script:AllowedTenants -contains $_.customerId }
+    }
+
     return $IncludedTenantsCache | Where-Object { ($null -ne $_.defaultDomainName -and ($_.defaultDomainName -notmatch 'Domain Error' -or $IncludeAll.IsPresent)) } | Where-Object $IncludedTenantFilter | Sort-Object -Property displayName
 }

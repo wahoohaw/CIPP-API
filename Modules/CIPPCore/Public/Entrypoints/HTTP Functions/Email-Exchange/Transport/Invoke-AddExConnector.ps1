@@ -1,9 +1,7 @@
-using namespace System.Net
-
-Function Invoke-AddExConnector {
+function Invoke-AddExConnector {
     <#
     .FUNCTIONALITY
-        Entrypoint
+        Entrypoint,AnyTenant
     .ROLE
         Exchange.Connector.ReadWrite
     #>
@@ -12,13 +10,22 @@ Function Invoke-AddExConnector {
 
     $APIName = $Request.Params.CIPPEndpoint
     $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
+
 
 
     $ConnectorType = ($Request.Body.PowerShellCommand | ConvertFrom-Json).cippConnectorType
     $RequestParams = $Request.Body.PowerShellCommand | ConvertFrom-Json | Select-Object -Property * -ExcludeProperty GUID, cippConnectorType, SenderRewritingEnabled
     if ($RequestParams.comment) { $RequestParams.comment = Get-CIPPTextReplacement -Text $RequestParams.comment -TenantFilter $Tenant } else { $RequestParams | Add-Member -NotePropertyValue 'no comment' -NotePropertyName comment -Force }
     $Tenants = ($Request.Body.selectedTenants).value
+
+    $AllowedTenants = Test-CippAccess -Request $Request -TenantList
+
+    if ($AllowedTenants -ne 'AllTenants') {
+        $AllTenants = Get-Tenants -IncludeErrors
+        $AllowedTenantList = $AllTenants | Where-Object { $_.customerId -in $AllowedTenants }
+        $Tenants = $Tenants | Where-Object { $_ -in $AllowedTenantList.defaultDomainName }
+    }
+
     $Result = foreach ($TenantFilter in $Tenants) {
         try {
             $null = New-ExoRequest -tenantid $TenantFilter -cmdlet "New-$($ConnectorType)connector" -cmdParams $RequestParams
@@ -31,8 +38,7 @@ Function Invoke-AddExConnector {
         }
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = @{Results = @($Result) }
         })

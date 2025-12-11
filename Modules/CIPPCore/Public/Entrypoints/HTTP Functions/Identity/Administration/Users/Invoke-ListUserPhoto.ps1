@@ -1,5 +1,3 @@
-using namespace System.Net
-
 Function Invoke-ListUserPhoto {
     <#
     .FUNCTIONALITY
@@ -9,8 +7,8 @@ Function Invoke-ListUserPhoto {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
-
-    $tenantFilter = $Request.Query.TenantFilter
+    # Interact with query parameters or the body of the request.
+    $tenantFilter = $Request.Query.tenantFilter
     $userId = $Request.Query.UserID
 
     $URI = "/users/$userId/photo/`$value"
@@ -27,8 +25,7 @@ Function Invoke-ListUserPhoto {
     #convert body from base64 to byte array
     $Body = [Convert]::FromBase64String($ImageData.body)
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode  = [HttpStatusCode]::OK
             ContentType = $ImageData.headers.'Content-Type'
             Body        = $Body

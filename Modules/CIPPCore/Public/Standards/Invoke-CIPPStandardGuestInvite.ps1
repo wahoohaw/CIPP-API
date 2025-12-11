@@ -13,6 +13,11 @@ function Invoke-CIPPStandardGuestInvite {
         CAT
             Entra (AAD) Standards
         TAG
+            "CISA (MS.AAD.18.1v1)"
+            "EIDSCA.AP04"
+            "EIDSCA.AP07"
+        EXECUTIVETEXT
+            Controls who within the organization can invite external partners and vendors to access company resources, ensuring proper oversight of external access while enabling necessary business collaboration. This helps maintain security while supporting partnership and vendor relationships.
         ADDEDCOMPONENT
             {"type":"autoComplete","required":true,"multiple":false,"creatable":false,"label":"Who can send invites?","name":"standards.GuestInvite.allowInvitesFrom","options":[{"label":"Everyone","value":"everyone"},{"label":"Admins, Guest inviters and All Members","value":"adminsGuestInvitersAndAllMembers"},{"label":"Admins and Guest inviters","value":"adminsAndGuestInviters"},{"label":"None","value":"none"}]}
         IMPACT
@@ -25,12 +30,19 @@ function Invoke-CIPPStandardGuestInvite {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#medium-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
 
-    $CurrentState = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/authorizationPolicy/authorizationPolicy' -tenantid $Tenant
+    try {
+        $CurrentState = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/authorizationPolicy/authorizationPolicy' -tenantid $Tenant
+    }
+    catch {
+        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get the GuestInvite state for $Tenant. Error: $ErrorMessage" -Sev Error
+        return
+    }
 
     # Input validation and value handling
     $AllowInvitesFromValue = $Settings.allowInvitesFrom.value ?? $Settings.allowInvitesFrom

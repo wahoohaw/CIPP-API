@@ -11,7 +11,7 @@ function Invoke-ExecBPA {
     $ConfigTable = Get-CIPPTable -tablename Config
     $Config = Get-CIPPAzDataTableEntity @ConfigTable -Filter "PartitionKey eq 'OffloadFunctions' and RowKey eq 'OffloadFunctions'"
 
-    $TenantFilter = $Request.Query.tenantFilter ?? $Request.Body.tenantFilter
+    $TenantFilter = $Request.Query.tenantFilter ? $Request.Query.tenantFilter.value : $Request.Body.tenantfilter.value
 
     if ($Config -and $Config.state -eq $true) {
         if ($env:CIPP_PROCESSOR -ne 'true') {
@@ -38,7 +38,7 @@ function Invoke-ExecBPA {
         $Results = [pscustomobject]@{'Results' = 'BPA started' }
     }
 
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $Results
         })

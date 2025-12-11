@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ExecCopyForSent {
+function Invoke-ExecCopyForSent {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -12,24 +10,31 @@ Function Invoke-ExecCopyForSent {
 
     $APIName = $Request.Params.CIPPEndpoint
     $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
+
 
     # Interact with query parameters or the body of the request.
-    $TenantFilter = $Request.Query.TenantFilter ?? $Request.Body.TenantFilter
+    $TenantFilter = $Request.Query.tenantFilter ?? $Request.Body.tenantFilter
     $UserID = $Request.Query.ID ?? $Request.Body.ID
-    $MessageCopyForSentAsEnabled = $Request.Query.MessageCopyForSentAsEnabled ?? $Request.Body.MessageCopyForSentAsEnabled
-    $MessageCopyForSentAsEnabled = [System.Convert]::ToBoolean($MessageCopyForSentAsEnabled)
+    $MessageCopyState = $Request.Query.messageCopyState ?? $Request.Body.messageCopyState
+    $MessageCopyState = [System.Convert]::ToBoolean($MessageCopyState)
 
-    Try {
-        $Result = Set-CIPPMessageCopy -userid $UserID -tenantFilter $TenantFilter -APIName $APIName -Headers $Headers -MessageCopyForSentAsEnabled $MessageCopyForSentAsEnabled
+    try {
+        $params = @{
+            UserId                            = $UserID
+            TenantFilter                      = $TenantFilter
+            APIName                           = $APIName
+            Headers                           = $Headers
+            MessageCopyForSentAsEnabled       = $MessageCopyState
+            MessageCopyForSendOnBehalfEnabled = $MessageCopyState
+        }
+        $Result = Set-CIPPMessageCopy @params
         $StatusCode = [HttpStatusCode]::OK
     } catch {
         $Result = "$($_.Exception.Message)"
         $StatusCode = [HttpStatusCode]::InternalServerError
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = $StatusCode
             Body       = @{ 'Results' = $Result }
         })

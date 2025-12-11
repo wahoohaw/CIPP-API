@@ -1,5 +1,3 @@
-using namespace System.Net
-
 function Invoke-AddUserBulk {
     <#
     .FUNCTIONALITY
@@ -10,9 +8,9 @@ function Invoke-AddUserBulk {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $APIName = 'AddUserBulk'
-    Write-LogMessage -headers $Request.Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
-    $TenantFilter = $Request.body.TenantFilter
+    $APIName = $Request.Params.CIPPEndpoint
+    # Interact with body parameters or the body of the request.
+    $TenantFilter = $Request.Body.tenantFilter
 
     $BulkUsers = $Request.Body.BulkUser
     $AssignedLicenses = $Request.Body.licenses
@@ -67,20 +65,8 @@ function Invoke-AddUserBulk {
                 if ($UsageLocation) {
                     $UserBody.usageLocation = $UsageLocation.value ?? $UsageLocation
                     Write-Information "- Usage location set to $($UsageLocation.label ?? $UsageLocation)"
-                    if ($AssignedLicenses) {
-                        $GuidPattern = '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})'
-                        $LicenseSkus = $AssignedLicenses.value ?? $AssignedLicenses | Where-Object { $_ -match $GuidPattern }
-                        if (($LicenseSkus | Measure-Object).Count -gt 0) {
-                            Write-Information "- Assigned licenses set to $(($AssignedLicenses.label ?? $AssignedLicenses) -join ', ')"
-                            $Licenses = foreach ($Sku in $LicenseSkus) {
-                                [PSCustomObject]@{
-                                    skuId = $Sku
-                                }
-                            }
-                            $UserBody.assignedLicenses = @($Licenses)
-                        }
-                    }
                 }
+
 
                 # Convert businessPhones to array if not null or empty
                 if (![string]::IsNullOrEmpty($User.businessPhones)) {
@@ -90,7 +76,7 @@ function Invoke-AddUserBulk {
                 # Add all other properties
                 foreach ($key in $User.PSObject.Properties.Name) {
                     if ($key -notin @('displayName', 'mailNickName', 'domain', 'password', 'usageLocation', 'businessPhones')) {
-                        if (![string]::IsNullOrEmpty($User.$key) -and $UserBody.$key -eq $null) {
+                        if (![string]::IsNullOrEmpty($User.$key) -and $null -eq $UserBody.$key) {
                             $UserBody.$key = $User.$key
                         }
                     }
@@ -137,6 +123,11 @@ function Invoke-AddUserBulk {
                         })
                 } else {
                     $Message = $Messages.Where({ $_.id -eq $BulkResult.id })
+                    if ($AssignedLicenses) {
+                        $GuidPattern = '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})'
+                        $LicenseSkus = $AssignedLicenses.value ?? $AssignedLicenses | Where-Object { $_ -match $GuidPattern }
+                        Set-CIPPUserLicense -UserId $BulkResult.id -AddLicenses $LicenseSkus -TenantFilter $TenantFilter -APIName $APIName -Headers $Headers
+                    }
                     $Results.Add(@{
                             resultText = $Message.resultText
                             state      = 'success'
@@ -156,8 +147,7 @@ function Invoke-AddUserBulk {
         }
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $Body
         })

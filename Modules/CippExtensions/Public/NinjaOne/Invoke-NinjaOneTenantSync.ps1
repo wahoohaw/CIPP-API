@@ -7,9 +7,21 @@ function Invoke-NinjaOneTenantSync {
         $StartQueueTime = Get-Date
         Write-Information "$(Get-Date) - Starting NinjaOne Sync"
 
-        # Stagger start
-        # Check Global Rate Limiting
-        $CurrentMap = Get-ExtensionRateLimit -ExtensionName 'NinjaOne' -ExtensionPartitionKey 'NinjaOneMapping' -RateLimit 5 -WaitTime 10
+        $MappingTable = Get-CIPPTable -TableName CippMapping
+        $CurrentMap = (Get-CIPPAzDataTableEntity @MappingTable -Filter "PartitionKey eq 'NinjaOneMapping'")
+        $CurrentMap | ForEach-Object {
+            if ($Null -ne $_.lastEndTime -and $_.lastEndTime -ne '') {
+                $_.lastEndTime = (Get-Date($_.lastEndTime))
+            } else {
+                $_ | Add-Member -NotePropertyName lastEndTime -NotePropertyValue $Null -Force
+            }
+
+            if ($Null -ne $_.lastStartTime -and $_.lastStartTime -ne '') {
+                $_.lastStartTime = (Get-Date($_.lastStartTime))
+            } else {
+                $_ | Add-Member -NotePropertyName lastStartTime -NotePropertyValue $Null -Force
+            }
+        }
 
         $StartTime = Get-Date
 
@@ -23,7 +35,7 @@ function Invoke-NinjaOneTenantSync {
         $EndDate = try { Get-Date($CurrentItem.lastEndTime) } catch { $Null }
 
         if (($null -ne $CurrentItem.lastStartTime) -and ($StartDate -gt (Get-Date).ToUniversalTime().AddMinutes(-10)) -and ( $Null -eq $CurrentItem.lastEndTime -or ($StartDate -gt $EndDate))) {
-            Throw "NinjaOne Sync for Tenant $($MappedTenant.RowKey) is still running, please wait 10 minutes and try again."
+            throw "NinjaOne Sync for Tenant $($MappedTenant.RowKey) is still running, please wait 10 minutes and try again."
         }
 
         # Set Last Start Time
@@ -45,10 +57,10 @@ function Invoke-NinjaOneTenantSync {
         $Customer = Get-Tenants -IncludeErrors | Where-Object { $_.customerId -eq $MappedTenant.RowKey }
         Write-Information "Processing: $($Customer.displayName) - Queued for $((New-TimeSpan -Start $StartQueueTime -End $StartTime).TotalSeconds)"
 
-        Write-LogMessage -API 'NinjaOneSync' -Headers'NinjaOneSync' -message "Processing NinjaOne Synchronization for $($Customer.displayName) - Queued for $((New-TimeSpan -Start $StartQueueTime -End $StartTime).TotalSeconds)" -Sev 'Info'
+        Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "Processing NinjaOne Synchronization for $($Customer.displayName) - Queued for $((New-TimeSpan -Start $StartQueueTime -End $StartTime).TotalSeconds)" -Sev 'Info'
 
         if (($Customer | Measure-Object).count -ne 1) {
-            Throw "Unable to match the recieved ID to a tenant QueueItem: $($QueueItem | ConvertTo-Json -Depth 100 | Out-String) Matched Customer: $($Customer| ConvertTo-Json -Depth 100 | Out-String)"
+            throw "Unable to match the received ID to a tenant QueueItem: $($QueueItem | ConvertTo-Json -Depth 100 | Out-String) Matched Customer: $($Customer| ConvertTo-Json -Depth 100 | Out-String)"
         }
 
         $TenantFilter = $Customer.defaultDomainName
@@ -296,14 +308,14 @@ function Invoke-NinjaOneTenantSync {
         $AllGroups = $ExtensionCache.Groups
         $Licenses = $ExtensionCache.Licenses
         $RawDomains = $ExtensionCache.Domains
-        $AllConditionalAccessPolicies = $ExtensionCache.ConditionalAccessPolicies
+        $AllConditionalAccessPolicies = $ExtensionCache.ConditionalAccess
 
         $CurrentSecureScore = ($SecureScore | Sort-Object createDateTime -Descending | Select-Object -First 1)
         $MaxSecureScoreRank = ($SecureScoreProfiles.rank | Measure-Object -Maximum).maximum
 
         $MaxSecureScore = $CurrentSecureScore.maxScore
 
-        [System.Collections.Generic.List[PSCustomObject]]$SecureScoreParsed = Foreach ($Score in $CurrentSecureScore.controlScores) {
+        [System.Collections.Generic.List[PSCustomObject]]$SecureScoreParsed = foreach ($Score in $CurrentSecureScore.controlScores) {
             $MatchedProfile = $SecureScoreProfiles | Where-Object { $_.id -eq $Score.controlName }
             [PSCustomObject]@{
                 Category             = $Score.controlCategory
@@ -448,7 +460,7 @@ function Invoke-NinjaOneTenantSync {
         }
 
         # Parse Devices
-        Foreach ($Device in $Devices | Where-Object { $_.id -notin $ParsedDevices.id }) {
+        foreach ($Device in $Devices | Where-Object { $_.id -notin $ParsedDevices.id }) {
 
             # First lets match on serial
             $MatchedNinjaDevice = $NinjaDevices | Where-Object { $_.system.biosSerialNumber -eq $Device.SerialNumber -or $_.system.serialNumber -eq $Device.SerialNumber }
@@ -489,7 +501,7 @@ function Invoke-NinjaOneTenantSync {
 
 
 
-            Foreach ($DeviceUser in $Device.usersloggedon) {
+            foreach ($DeviceUser in $Device.usersloggedon) {
                 $FoundUser = ($Users | Where-Object { $_.id -eq $DeviceUser.userid })
                 $DeviceUsers.add($FoundUser.DisplayName)
                 $DeviceUserIDs.add($DeviceUser.userId)
@@ -611,7 +623,7 @@ function Invoke-NinjaOneTenantSync {
                     if ($Device.complianceState -eq 'compliant') {
                         $Compliance = '<i class="fas fa-check-circle" title="Device Compliant" style="color:#26A644;"></i>&nbsp;&nbsp; Compliant'
                     } else {
-                        $Compliance = '<i class="fas fa-times-circle" title="Device Not Compliannt" style="color:#D53948;"></i>&nbsp;&nbsp; Not Compliant'
+                        $Compliance = '<i class="fas fa-times-circle" title="Device Not Compliant" style="color:#D53948;"></i>&nbsp;&nbsp; Not Compliant'
                     }
 
                     # Device Details
@@ -753,7 +765,7 @@ function Invoke-NinjaOneTenantSync {
 
                 $NinjaOneUser = $NinjaOneUserDocs | Where-Object { $_.ParsedFields.cippUserID -eq $User.ID }
                 if (($NinjaOneUser | Measure-Object).count -gt 1) {
-                    Throw 'Multiple Users with the same ID found'
+                    throw 'Multiple Users with the same ID found'
                 }
 
 
@@ -780,7 +792,6 @@ function Invoke-NinjaOneTenantSync {
                     }
                 }
 
-
                 #$PermsRequest = ''
                 $StatsRequest = ''
                 $MailboxDetailedRequest = ''
@@ -788,7 +799,7 @@ function Invoke-NinjaOneTenantSync {
 
                 $CASRequest = $CASFull | Where-Object { $_.ExternalDirectoryObjectId -eq $User.iD }
                 $MailboxDetailedRequest = $MailboxDetailedFull | Where-Object { $_.ExternalDirectoryObjectId -eq $User.iD }
-                $StatsRequest = $MailboxStatsFull | Where-Object { $_.'User Principal Name' -eq $User.UserPrincipalName }
+                $StatsRequest = $MailboxStatsFull | Where-Object { $_.userPrincipalName -eq $User.UserPrincipalName }
 
 
                 $ParsedPerms = foreach ($Perm in $Permissions) {
@@ -801,7 +812,7 @@ function Invoke-NinjaOneTenantSync {
                 }
 
                 try {
-                    $TotalItemSize = [math]::Round($StatsRequest.'Storage Used (Byte)' / 1Gb, 2)
+                    $TotalItemSize = [math]::Round($StatsRequest.storageUsedInBytes / 1Gb, 2)
                 } catch {
                     $TotalItemSize = 0
                 }
@@ -809,7 +820,7 @@ function Invoke-NinjaOneTenantSync {
                 $UserMailSettings = [pscustomobject]@{
                     ForwardAndDeliver        = $MailboxDetailedRequest.DeliverToMailboxAndForward
                     ForwardingAddress        = $MailboxDetailedRequest.ForwardingAddress + ' ' + $MailboxDetailedRequest.ForwardingSmtpAddress
-                    LitiationHold            = $MailboxDetailedRequest.LitigationHoldEnabled
+                    LitigationHold           = $MailboxDetailedRequest.LitigationHoldEnabled
                     HiddenFromAddressLists   = $MailboxDetailedRequest.HiddenFromAddressListsEnabled
                     EWSEnabled               = $CASRequest.EwsEnabled
                     MailboxMAPIEnabled       = $CASRequest.MAPIEnabled
@@ -818,10 +829,11 @@ function Invoke-NinjaOneTenantSync {
                     MailboxPopEnabled        = $CASRequest.PopEnabled
                     MailboxActiveSyncEnabled = $CASRequest.ActiveSyncEnabled
                     Permissions              = $ParsedPerms
-                    ProhibitSendQuota        = [math]::Round([float]($MailboxDetailedRequest.ProhibitSendQuota -split ' GB')[0], 2)
-                    ProhibitSendReceiveQuota = [math]::Round([float]($MailboxDetailedRequest.ProhibitSendReceiveQuota -split ' GB')[0], 2)
-                    ItemCount                = [math]::Round($StatsRequest.'Item Count', 2)
-                    TotalItemSize            = $TotalItemSize
+                    ProhibitSendQuota        = $StatsRequest.prohibitSendQuotaInBytes
+                    ProhibitSendReceiveQuota = $StatsRequest.prohibitSendReceiveQuotaInBytes
+                    ItemCount                = [math]::Round($StatsRequest.itemCount, 2)
+                    TotalItemSize            = $StatsRequest.totalItemSize
+                    StorageUsedInBytes       = $StatsRequest.storageUsedInBytes
                 }
 
 
@@ -843,11 +855,11 @@ function Invoke-NinjaOneTenantSync {
                     if ($UserDevice.Compliance -eq 'compliant') {
                         $ComplianceIcon = '<i class="fas fa-check-circle" title="Device Compliant" style="color:#26A644;"></i>'
                     } else {
-                        $ComplianceIcon = '<i class="fas fa-times-circle" title="Device Not Compliannt" style="color:#D53948;"></i>'
+                        $ComplianceIcon = '<i class="fas fa-times-circle" title="Device Not Compliant" style="color:#D53948;"></i>'
                     }
 
                     # OS Icon
-                    $OSIcon = Switch ($UserDevice.OS) {
+                    $OSIcon = switch ($UserDevice.OS) {
                         'Windows' { '<i class="fab fa-windows"></i>' }
                         'iOS' { '<i class="fab fa-apple"></i>' }
                         'Android' { '<i class="fab fa-android"></i>' }
@@ -872,9 +884,9 @@ function Invoke-NinjaOneTenantSync {
 
 
 
-                $UserOneDriveStats = $OneDriveDetails | Where-Object { $_.'Owner Principal Name' -eq $User.userPrincipalName } | Select-Object -First 1
-                $UserOneDriveUse = $UserOneDriveStats.'Storage Used (Byte)' / 1GB
-                $UserOneDriveTotal = $UserOneDriveStats.'Storage Allocated (Byte)' / 1GB
+                $UserOneDriveStats = $OneDriveDetails | Where-Object { $_.ownerPrincipalName -eq $User.userPrincipalName } | Select-Object -First 1
+                $UserOneDriveUse = $UserOneDriveStats.storageUsedInBytes / 1GB
+                $UserOneDriveTotal = $UserOneDriveStats.storageAllocatedInBytes / 1GB
 
                 if ($UserOneDriveTotal) {
                     $OneDriveUse = [PSCustomObject]@{
@@ -908,13 +920,13 @@ function Invoke-NinjaOneTenantSync {
 
                 if ($UserOneDriveStats) {
                     $OneDriveCardData = [PSCustomObject]@{
-                        'One Drive URL'            = '<a href="' + ($UserOneDriveStats.'Site URL') + '">' + ($UserOneDriveStats.'Site URL') + '</a>'
-                        'Is Deleted'               = "$($UserOneDriveStats.'Is Deleted')"
-                        'Last Activity Date'       = "$($UserOneDriveStats.'Last Activity Date')"
-                        'File Count'               = "$($UserOneDriveStats.'File Count')"
-                        'Active File Count'        = "$($UserOneDriveStats.'Active File Count')"
-                        'Storage Used (Byte)'      = "$($UserOneDriveStats.'Storage Used (Byte)')"
-                        'Storage Allocated (Byte)' = "$($UserOneDriveStats.'Storage Allocated (Byte)')"
+                        'One Drive URL'            = '<a href="' + ($UserOneDriveStats.siteUrl) + '">' + ($UserOneDriveStats.siteUrl) + '</a>'
+                        'Is Deleted'               = "$($UserOneDriveStats.isDeleted)"
+                        'Last Activity Date'       = "$($UserOneDriveStats.lastActivityDate)"
+                        'File Count'               = "$($UserOneDriveStats.fileCount)"
+                        'Active File Count'        = "$($UserOneDriveStats.activeFileCount)"
+                        'Storage Used (Byte)'      = "$($UserOneDriveStats.storageUsedInBytes)"
+                        'Storage Allocated (Byte)' = "$($UserOneDriveStats.storageAllocatedInBytes)"
                         'One Drive Usage'          = $OneDriveParsed
 
                     }
@@ -925,9 +937,9 @@ function Invoke-NinjaOneTenantSync {
                 }
 
 
-                $UserMailboxStats = $MailboxStatsFull | Where-Object { $_.'User Principal Name' -eq $User.userPrincipalName } | Select-Object -First 1
-                $UserMailUse = $UserMailboxStats.'Storage Used (Byte)' / 1GB
-                $UserMailTotal = $UserMailboxStats.'Prohibit Send/Receive Quota (Byte)' / 1GB
+                $UserMailboxStats = $MailboxStatsFull | Where-Object { $_.userPrincipalName -eq $User.userPrincipalName } | Select-Object -First 1
+                $UserMailUse = $UserMailboxStats.storageUsedInBytes / 1GB
+                $UserMailTotal = $UserMailboxStats.prohibitSendReceiveQuotaInBytes / 1GB
 
 
                 if ($UserMailTotal) {
@@ -961,19 +973,30 @@ function Invoke-NinjaOneTenantSync {
 
 
                 if ($UserMailSettings.ProhibitSendQuota) {
+                    # Calculate GB values for display
+                    try {
+                        $MailboxProhibitSendQuota = [math]::Round($UserMailSettings.ProhibitSendQuota / 1024 / 1024 / 1024, 2)
+                        $MailboxProhibitSendReceiveQuota = [math]::Round($UserMailSettings.ProhibitSendReceiveQuota / 1024 / 1024 / 1024, 2)
+                        $MailboxStorageUsed = [math]::Round($UserMailSettings.StorageUsedInBytes / 1024 / 1024 / 1024, 2)
+                    } catch {
+                        $MailboxProhibitSendQuota = 0
+                        $MailboxProhibitSendReceiveQuota = 0
+                        $MailboxStorageUsed = 0
+                    }
+
                     $MailboxDetailsCardData = [PSCustomObject]@{
                         #'Permissions'                 = "$($UserMailSettings.Permissions | ConvertTo-Html -Fragment | Out-String)"
-                        'Prohibit Send Quota'         = "$($UserMailSettings.ProhibitSendQuota)"
-                        'Prohibit Send Receive Quota' = "$($UserMailSettings.ProhibitSendReceiveQuota)"
-                        'Item Count'                  = "$($UserMailSettings.ProhibitSendReceiveQuota)"
-                        'Total Mailbox Size'          = "$($UserMailSettings.ItemCount)"
+                        'Prohibit Send Quota'         = "$($MailboxProhibitSendQuota) GB"
+                        'Prohibit Send Receive Quota' = "$($MailboxProhibitSendReceiveQuota) GB"
+                        'Item Count'                  = "$($UserMailSettings.ItemCount)"
+                        'Total Mailbox Size'          = "$($MailboxStorageUsed) GB"
                         'Mailbox Usage'               = $MailboxParsed
                     }
 
                     $MailboxSettingsCard = [PSCustomObject]@{
                         'Forward and Deliver'       = "$($UserMailSettings.ForwardAndDeliver)"
                         'Forwarding Address'        = "$($UserMailSettings.ForwardingAddress)"
-                        'Litiation Hold'            = "$($UserMailSettings.LitiationHold)"
+                        'Litigation Hold'           = "$($UserMailSettings.LitigationHold)"
                         'Hidden From Address Lists' = "$($UserMailSettings.HiddenFromAddressLists)"
                         'EWS Enabled'               = "$($UserMailSettings.EWSEnabled)"
                         'MAPI Enabled'              = "$($UserMailSettings.MailboxMAPIEnabled)"
@@ -1180,7 +1203,7 @@ function Invoke-NinjaOneTenantSync {
                             Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
                             [System.Collections.Generic.List[PSCustomObject]]$NinjaUserCreation = @()
                         }
-                    } Catch {
+                    } catch {
                         Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
                     }
 
@@ -1192,7 +1215,7 @@ function Invoke-NinjaOneTenantSync {
                             Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
                             [System.Collections.Generic.List[PSCustomObject]]$NinjaUserUpdates = @()
                         }
-                    } Catch {
+                    } catch {
                         Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
                     }
 
@@ -1236,7 +1259,7 @@ function Invoke-NinjaOneTenantSync {
 
                 }
             } catch {
-                Write-Error "User $($User.UserPrincipalName): A fatal error occured while processing user $_"
+                Write-Error "User $($User.UserPrincipalName): A fatal error occurred while processing user $_"
             }
 
         }
@@ -1255,7 +1278,7 @@ function Invoke-NinjaOneTenantSync {
                     Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserCreation
 
                 }
-            } Catch {
+            } catch {
                 Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
             }
 
@@ -1266,7 +1289,7 @@ function Invoke-NinjaOneTenantSync {
                     [System.Collections.Generic.List[PSCustomObject]]$UpdatedUsers = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method PATCH -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ("[$($NinjaUserUpdates.body -join ',')]") -EA Stop).content | ConvertFrom-Json -Depth 100
                     Remove-AzDataTableEntity -Force @UsersUpdateTable -Entity $NinjaUserUpdates
                 }
-            } Catch {
+            } catch {
                 Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
             }
 
@@ -1311,10 +1334,10 @@ function Invoke-NinjaOneTenantSync {
 
 
             # Relate Users to Devices
-            Foreach ($LinkDevice in $ParsedDevices | Where-Object { $null -ne $_.NinjaDevice }) {
+            foreach ($LinkDevice in $ParsedDevices | Where-Object { $null -ne $_.NinjaDevice }) {
                 $RelatedItems = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/related-items/with-entity/NODE/$($LinkDevice.NinjaDevice.id)" -Method GET -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json').content | ConvertFrom-Json -Depth 100
                 [System.Collections.Generic.List[PSCustomObject]]$Relations = @()
-                Foreach ($LinkUser in $LinkDevice.UserIDs) {
+                foreach ($LinkUser in $LinkDevice.UserIDs) {
                     $MatchedUser = $UsersMap | Where-Object { $_.M365ID -eq $LinkUser }
                     if (($MatchedUser | Measure-Object).count -eq 1) {
                         $ExistingRelation = $RelatedItems | Where-Object { $_.relEntityType -eq 'DOCUMENT' -and $_.relEntityId -eq $MatchedUser.NinjaOneID }
@@ -1338,7 +1361,7 @@ function Invoke-NinjaOneTenantSync {
                         $Null = Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/related-items/entity/NODE/$($LinkDevice.NinjaDevice.id)/relations" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json' -Body ($Relations | ConvertTo-Json -Depth 100 -AsArray) -EA Stop
                         Write-Information 'Completed Update'
                     }
-                } Catch {
+                } catch {
                     Write-Information "Creating Relations Failed: $_"
                 }
             }
@@ -1449,7 +1472,7 @@ function Invoke-NinjaOneTenantSync {
                     Write-Information 'Creating NinjaOne Licenses'
                     [System.Collections.Generic.List[PSCustomObject]]$CreatedLicenses = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ($NinjaLicenseCreation | ConvertTo-Json -Depth 100 -AsArray) -EA Stop).content | ConvertFrom-Json -Depth 100
                 }
-            } Catch {
+            } catch {
                 Write-Information "Bulk Creation Error, but may have been successful as only 1 record with an issue could have been the cause: $_"
             }
 
@@ -1460,7 +1483,7 @@ function Invoke-NinjaOneTenantSync {
                     [System.Collections.Generic.List[PSCustomObject]]$UpdatedLicenses = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/organization/documents" -Method PATCH -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -Body ($NinjaLicenseUpdates | ConvertTo-Json -Depth 100 -AsArray) -EA Stop).content | ConvertFrom-Json -Depth 100
                     Write-Information 'Completed Update'
                 }
-            } Catch {
+            } catch {
                 Write-Information "Bulk Update Errored, but may have been successful as only 1 record with an issue could have been the cause: $_"
             }
 
@@ -1468,13 +1491,13 @@ function Invoke-NinjaOneTenantSync {
 
             if ($Configuration.LicenseDocumentsEnabled -eq $True -and $Configuration.UserDocumentsEnabled -eq $True) {
                 # Relate Subscriptions to Users
-                Foreach ($LinkLic in $LicenseDetails) {
+                foreach ($LinkLic in $LicenseDetails) {
                     $MatchedLicDoc = $LicenseDocs | Where-Object { $_.documentName -eq $LinkLic.name }
                     if (($MatchedLicDoc | Measure-Object).count -eq 1) {
                         # Remove existing relations
                         $RelatedItems = (Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/related-items/with-entity/DOCUMENT/$($MatchedLicDoc.documentId)" -Method GET -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json').content | ConvertFrom-Json -Depth 100
                         [System.Collections.Generic.List[PSCustomObject]]$Relations = @()
-                        Foreach ($LinkUser in $LinkLic.Users) {
+                        foreach ($LinkUser in $LinkLic.Users) {
                             $ExistingRelation = $RelatedItems | Where-Object { $_.relEntityType -eq 'DOCUMENT' -and $_.relEntityId -eq $LinkUser }
                             if (!$ExistingRelation) {
                                 $Relations.Add(
@@ -1494,7 +1517,7 @@ function Invoke-NinjaOneTenantSync {
                                 $Null = Invoke-WebRequest -Uri "https://$($Configuration.Instance)/api/v2/related-items/entity/DOCUMENT/$($($MatchedLicDoc.documentId))/relations" -Method POST -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json' -Body ($Relations | ConvertTo-Json -Depth 100 -AsArray) -EA Stop
                                 Write-Information 'Completed Update'
                             }
-                        } Catch {
+                        } catch {
                             Write-Information "Creating Relations Failed: $_"
                         }
 
@@ -1523,12 +1546,12 @@ function Invoke-NinjaOneTenantSync {
             $ManagementLinksData = @(
                 @{
                     Name = 'M365 Admin Portal'
-                    Link = "https://portal.office.com/Partner/BeginClientSession.aspx?CTID=$($customer.customerId)&CSDEST=o365admincenter"
+                    Link = "https://admin.cloud.microsoft?delegatedOrg=$($customer.defaultDomainName)"
                     Icon = 'fas fa-cogs'
                 },
                 @{
                     Name = 'Exchange Portal'
-                    Link = "https://admin.exchange.microsoft.com/?landingpage=homepage&form=mac_sidebar&delegatedOrg=$($Customer.defaultDomainName)#"
+                    Link = "https://admin.cloud.microsoft/exchange?delegatedOrg=$($Customer.defaultDomainName)"
                     Icon = 'fas fa-mail-bulk'
                 },
                 @{
@@ -1538,7 +1561,7 @@ function Invoke-NinjaOneTenantSync {
                 },
                 @{
                     Name = 'Intune Portal'
-                    Link = "https://endpoint.microsoft.com/$($customer.defaultDomainName)/"
+                    Link = "https://intune.microsoft.com/$($customer.defaultDomainName)/"
                     Icon = 'fas fa-laptop'
                 },
                 @{
@@ -1548,7 +1571,7 @@ function Invoke-NinjaOneTenantSync {
                 },
                 @{
                     Name = 'Teams Admin'
-                    Link = "https://admin.teams.microsoft.com/?delegatedOrg=$($Customer.defaultDomainName)"
+                    Link = "https://admin.teams.microsoft.com?delegatedOrg=$($Customer.defaultDomainName)"
                     Icon = 'fas fa-users'
                 },
                 @{
@@ -1565,6 +1588,16 @@ function Invoke-NinjaOneTenantSync {
                     Name = 'Azure Portal'
                     Link = "https://portal.azure.com/$($customer.defaultDomainName)"
                     Icon = 'fas fa-server'
+                },
+                @{
+                    Name = 'Power Platform Portal'
+                    Link = "https://admin.powerplatform.microsoft.com/account/login/$($Customer.customerId)"
+                    Icon = 'fa-solid fa-robot'
+                },
+                @{
+                    Name = 'Power BI Portal'
+                    Link = "https://app.powerbi.com/admin-portal?ctid=$($Customer.customerId)"
+                    Icon = 'fas fa-bar-chart'
                 }
 
             )
@@ -1575,7 +1608,7 @@ function Invoke-NinjaOneTenantSync {
 
                 @{
                     Name = 'CIPP Tenant Dashboard'
-                    Link = "https://$CIPPUrl?tenantFilter=$($Customer.defaultDomainName)"
+                    Link = "https://$CIPPUrl/?tenantFilter=$($Customer.defaultDomainName)"
                     Icon = 'fas fa-shield-halved'
                 },
                 @{
@@ -1799,7 +1832,7 @@ function Invoke-NinjaOneTenantSync {
             }
 
             # Recommended Actions HTML
-            $RecommendedActionsHTML = $Top5Actions | Select-Object 'Recommended Action', @{n = 'Score Impact'; e = { "+$($_.'Score Impact')%" } }, Category, @{n = 'Link'; e = { '<a href="' + $_.link + '" target="_blank"><i class="fas fa-arrow-up-right-from-square" style="color: #337ab7;"></i></a>' } } | ConvertTo-Html -As Table -Fragment
+            $RecommendedActionsHTML = $Top5Actions | Select-Object 'Recommended Action', @{n = 'Score Impact'; e = { "+$($_.scoreImpact)%" } }, Category, @{n = 'Link'; e = { '<a href="' + $_.link + '" target="_blank"><i class="fas fa-arrow-up-right-from-square" style="color: #337ab7;"></i></a>' } } | ConvertTo-Html -As Table -Fragment
 
             $TitleLink = "https://security.microsoft.com/securescore?viewid=overview&tid=$($Customer.customerId)"
 
@@ -1816,13 +1849,22 @@ function Invoke-NinjaOneTenantSync {
             Set-Location $CIPPRoot
 
             try {
-                $StandardsDefinitions = Get-Content 'config/standards.json' | ConvertFrom-Json -Depth 100
+                $StandardsDefinitions = Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/KelvinTegelaar/CIPP/refs/heads/main/src/data/standards.json'
                 $AppliedStandards = Get-CIPPStandards -TenantFilter $Customer.defaultDomainName
                 $Templates = Get-CIPPTable 'templates'
                 $StandardTemplates = Get-CIPPAzDataTableEntity @Templates | Where-Object { $_.PartitionKey -eq 'StandardsTemplateV2' }
 
                 $ParsedStandards = foreach ($Standard in $AppliedStandards) {
-                    $Template = ($StandardTemplates | Where-Object { $_.RowKey -eq $Standard.TemplateId }).JSON | ConvertFrom-Json
+                    Write-Information "Processing Standard: $($Standard | ConvertTo-Json -Depth 10)"
+                    if ($Standard.TemplateId.Count -gt 1) {
+                        $TemplateListTemplates = foreach ($TemplateId in $Standard.TemplateId) {
+                            if ($TemplateId) {
+                                ($StandardTemplates | Where-Object { $_.RowKey -eq $TemplateId }).JSON | ConvertFrom-Json
+                            }
+                        }
+                    } else {
+                        $Template = ($StandardTemplates | Where-Object { $_.RowKey -eq $Standard.TemplateId }).JSON | ConvertFrom-Json
+                    }
                     $StandardInfo = $StandardsDefinitions | Where-Object { ($_.name -replace 'standards.', '') -eq $Standard.Standard }
                     $StandardLabel = $StandardInfo.label
                     $ParsedActions = foreach ($Action in $Standard.Settings.PSObject.Properties) {
@@ -1830,10 +1872,57 @@ function Invoke-NinjaOneTenantSync {
                             (Get-Culture).TextInfo.ToTitleCase($Action.Name)
                         }
                     }
-                    [PSCustomObject]@{
-                        Standard = $StandardLabel
-                        Template = $Template.templateName
-                        Actions  = $ParsedActions -join ', '
+
+                    # Handle template-based standards that have lists of templates
+                    if ($Standard.Standard -in @('IntuneTemplate', 'ConditionalAccessTemplate', 'GroupTemplate')) {
+                        # For template standards, create separate entries for each template
+                        foreach ($Property in $Standard.Settings.PSObject.Properties) {
+                            if ($Property.Value -is [Array]) {
+                                $x = 0
+                                foreach ($TemplateItem in $Property.Value) {
+                                    $TemplateName = $null
+                                    $TemplateActions = @()
+
+                                    Write-Information "Processing Template Item: $($TemplateItem | ConvertTo-Json -Depth 10)"
+                                    # Get template name
+                                    if ($TemplateItem.TemplateList.label) {
+                                        $TemplateName = $TemplateItem.TemplateList.label
+                                    } elseif ($TemplateItem.'TemplateList-Tags'.label) {
+                                        $TemplateName = $TemplateItem.'TemplateList-Tags'.label
+                                    } else {
+                                        $TemplateName = $TemplateItem.TemplateList.displayName
+                                    }
+
+                                    # Get template-specific actions
+                                    foreach ($ItemAction in $TemplateItem.PSObject.Properties) {
+                                        if ($ItemAction.Value -eq $true -and $ItemAction.Name -in @('remediate', 'report', 'alert')) {
+                                            $TemplateActions += (Get-Culture).TextInfo.ToTitleCase($ItemAction.Name)
+                                        }
+                                    }
+
+                                    # If no template-specific actions, use standard-level actions
+                                    if ($TemplateActions.Count -eq 0) {
+                                        $TemplateActions = $ParsedActions
+                                    }
+
+                                    if ($TemplateName) {
+                                        [PSCustomObject]@{
+                                            Standard = "$StandardLabel - $TemplateName"
+                                            Template = $TemplateListTemplates[$x].templateName
+                                            Actions  = $TemplateActions -join ', '
+                                        }
+                                    }
+                                    $x++
+                                }
+                            }
+                        }
+                    } else {
+                        # For non-template standards, use the original logic
+                        [PSCustomObject]@{
+                            Standard = $StandardLabel
+                            Template = $Template.templateName
+                            Actions  = $ParsedActions -join ', '
+                        }
                     }
                 }
                 $ParsedStandardsHTML = $ParsedStandards | ConvertTo-Html -As Table -Fragment
@@ -2126,7 +2215,7 @@ function Invoke-NinjaOneTenantSync {
         $CurrentItem | Add-Member -NotePropertyName lastStatus -NotePropertyValue 'Completed' -Force
         Add-CIPPAzDataTableEntity @MappingTable -Entity $CurrentItem -Force
 
-        Write-LogMessage -API 'NinjaOneSync' -Headers'NinjaOneSync' -message "Completed NinjaOne Sync for $($Customer.displayName). Queued for $((New-TimeSpan -Start $StartQueueTime -End $StartTime).TotalSeconds) seconds. Data fetched in $((New-TimeSpan -Start $StartTime -End $FetchEnd).TotalSeconds) seconds. Total processing time $((New-TimeSpan -Start $StartTime -End (Get-Date)).TotalSeconds) seconds" -Sev 'info'
+        Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "Completed NinjaOne Sync for $($Customer.displayName). Queued for $((New-TimeSpan -Start $StartQueueTime -End $StartTime).TotalSeconds) seconds. Data fetched in $((New-TimeSpan -Start $StartTime -End $FetchEnd).TotalSeconds) seconds. Total processing time $((New-TimeSpan -Start $StartTime -End (Get-Date)).TotalSeconds) seconds" -Sev 'info'
 
     } catch {
         $Message = if ($_.ErrorDetails.Message) {
@@ -2136,7 +2225,7 @@ function Invoke-NinjaOneTenantSync {
             $_.Exception.message
         }
         Write-Error "Failed NinjaOne Processing for $($Customer.displayName) Linenumber: $($_.InvocationInfo.ScriptLineNumber) Error:  $Message"
-        Write-LogMessage -API 'NinjaOneSync' -Headers'NinjaOneSync' -message "Failed NinjaOne Processing for $($Customer.displayName) Linenumber: $($_.InvocationInfo.ScriptLineNumber) Error: $Message" -Sev 'Error'
+        Write-LogMessage -tenant $Customer.defaultDomainName -API 'NinjaOneSync' -message "Failed NinjaOne Processing for $($Customer.displayName) Linenumber: $($_.InvocationInfo.ScriptLineNumber) Error: $Message" -Sev 'Error'
         $CurrentItem | Add-Member -NotePropertyName lastEndTime -NotePropertyValue ([string]$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))) -Force
         $CurrentItem | Add-Member -NotePropertyName lastStatus -NotePropertyValue 'Failed' -Force
         Add-CIPPAzDataTableEntity @MappingTable -Entity $CurrentItem -Force

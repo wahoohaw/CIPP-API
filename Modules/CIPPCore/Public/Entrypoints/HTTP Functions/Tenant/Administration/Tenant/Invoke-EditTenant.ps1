@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-EditTenant {
+function Invoke-EditTenant {
     <#
     .FUNCTIONALITY
         Entrypoint,AnyTenant
@@ -11,9 +9,10 @@ Function Invoke-EditTenant {
     param($Request, $TriggerMetadata)
 
     $APIName = $Request.Params.CIPPEndpoint
+    $Headers = $Request.Headers
 
-    Write-LogMessage -headers $Request.Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
 
+    # Interact with query parameters or the body of the request.
     $customerId = $Request.Body.customerId
     $tenantAlias = $Request.Body.tenantAlias
     $tenantGroups = $Request.Body.tenantGroups
@@ -46,9 +45,9 @@ Function Invoke-EditTenant {
         }
 
         # Update tenant groups
-        $CurrentMembers = Get-CIPPAzDataTableEntity @GroupMembersTable -Filter "customerId eq '$customerId'"
+        $CurrentGroupMemberships = Get-CIPPAzDataTableEntity @GroupMembersTable -Filter "customerId eq '$customerId'"
         foreach ($Group in $tenantGroups) {
-            $GroupEntity = $CurrentMembers | Where-Object { $_.GroupId -eq $Group.groupId }
+            $GroupEntity = $CurrentGroupMemberships | Where-Object { $_.GroupId -eq $Group.groupId }
             if (!$GroupEntity) {
                 $GroupEntity = @{
                     PartitionKey = 'Member'
@@ -61,27 +60,45 @@ Function Invoke-EditTenant {
         }
 
         # Remove any groups that are no longer selected
-        foreach ($Group in $CurrentMembers) {
-            if ($tenantGroups -notcontains $Group.GroupId) {
+        foreach ($Group in $CurrentGroupMemberships) {
+            if ($tenantGroups.GroupId -notcontains $Group.GroupId) {
                 Remove-AzDataTableEntity @GroupMembersTable -Entity $Group
             }
         }
+        $DomainBasedEntries = Get-CIPPAzDataTableEntity @GroupMembersTable -Filter "customerId eq '$($Tenant.defaultDomainName)'"
+            if ($DomainBasedEntries) {
+                foreach ($Entry in $DomainBasedEntries) {
+                    try {
+                        # Add corrected GUID-based entry using the actual GUID
+                        $NewEntry = @{
+                            PartitionKey = 'Member'
+                            RowKey       = '{0}-{1}' -f $Entry.GroupId, $Tenant.customerId
+                            GroupId      = $Entry.GroupId
+                            customerId   = $Tenant.customerId
+                        }
+                        Add-CIPPAzDataTableEntity @GroupMembersTable -Entity $NewEntry -Force
+                        Remove-AzDataTableEntity @GroupMembersTable -Entity $Entry
+                    } catch {
+                        Write-Host "Error migrating entry: $($_.Exception.Message)"
+                    }
+                }
+            }
 
         $response = @{
             state      = 'success'
             resultText = 'Tenant details updated successfully'
         }
-        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+        return ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::OK
                 Body       = $response
             })
     } catch {
-        Write-LogMessage -headers $Request.Headers -tenant $customerId -API $APINAME -message "Edit Tenant failed. The error is: $($_.Exception.Message)" -Sev 'Error'
+        Write-LogMessage -headers $Headers -tenant $customerId -API $APINAME -message "Edit Tenant failed. The error is: $($_.Exception.Message)" -Sev 'Error'
         $response = @{
             state      = 'error'
             resultText = $_.Exception.Message
         }
-        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+        return ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::InternalServerError
                 Body       = $response
             })

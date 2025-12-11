@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ExecAccessChecks {
+function Invoke-ExecAccessChecks {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -11,9 +9,6 @@ Function Invoke-ExecAccessChecks {
     param($Request, $TriggerMetadata)
 
     $APIName = $Request.Params.CIPPEndpoint
-    $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
-
     $Table = Get-CIPPTable -tablename 'AccessChecks'
     $LastRun = (Get-Date).ToUniversalTime()
     $4HoursAgo = (Get-Date).AddHours(-1).ToUniversalTime()
@@ -50,16 +45,19 @@ Function Invoke-ExecAccessChecks {
                     $Results = foreach ($Tenant in $Tenants) {
                         $TenantCheck = $AccessChecks | Where-Object -Property RowKey -EQ $Tenant.customerId | Select-Object -Property Data
                         $TenantResult = [PSCustomObject]@{
-                            TenantId          = $Tenant.customerId
-                            TenantName        = $Tenant.displayName
-                            DefaultDomainName = $Tenant.defaultDomainName
-                            GraphStatus       = 'Not run yet'
-                            ExchangeStatus    = 'Not run yet'
-                            GDAPRoles         = ''
-                            MissingRoles      = ''
-                            LastRun           = ''
-                            GraphTest         = ''
-                            ExchangeTest      = ''
+                            TenantId                  = $Tenant.customerId
+                            TenantName                = $Tenant.displayName
+                            DefaultDomainName         = $Tenant.defaultDomainName
+                            GraphStatus               = 'Not run yet'
+                            ExchangeStatus            = 'Not run yet'
+                            GDAPRoles                 = ''
+                            MissingRoles              = ''
+                            LastRun                   = ''
+                            GraphTest                 = ''
+                            ExchangeTest              = ''
+                            OrgManagementRoles        = @()
+                            OrgManagementRolesMissing = @()
+                            OrgManagementRepairNeeded = $false
                         }
                         if ($TenantCheck) {
                             $Data = @($TenantCheck.Data | ConvertFrom-Json -ErrorAction Stop)
@@ -70,6 +68,9 @@ Function Invoke-ExecAccessChecks {
                             $TenantResult.LastRun = $Data.LastRun
                             $TenantResult.GraphTest = $Data.GraphTest
                             $TenantResult.ExchangeTest = $Data.ExchangeTest
+                            $TenantResult.OrgManagementRoles = $Data.OrgManagementRoles ? @($Data.OrgManagementRoles) : @()
+                            $TenantResult.OrgManagementRolesMissing = $Data.OrgManagementRolesMissing ? @($Data.OrgManagementRolesMissing) : @()
+                            $TenantResult.OrgManagementRepairNeeded = $Data.OrgManagementRolesMissing.Count -gt 0
                         }
                         $TenantResult
                     }
@@ -135,8 +136,7 @@ Function Invoke-ExecAccessChecks {
         'Metadata' = $Metadata
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $body
         })

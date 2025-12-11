@@ -13,7 +13,6 @@ function Invoke-CIPPStandardAntiPhishPolicy {
         CAT
             Defender Standards
         TAG
-            "CIS"
             "mdo_safeattachments"
             "mdo_highconfidencespamaction"
             "mdo_highconfidencephishaction"
@@ -21,6 +20,8 @@ function Invoke-CIPPStandardAntiPhishPolicy {
             "mdo_spam_notifications_only_for_admins"
             "mdo_antiphishingpolicies"
             "mdo_phishthresholdlevel"
+            "CIS M365 5.0 (2.1.7)"
+            "NIST CSF 2.0 (DE.CM-09)"
         ADDEDCOMPONENT
             {"type":"number","label":"Phishing email threshold. (Default 1)","name":"standards.AntiPhishPolicy.PhishThresholdLevel","defaultValue":1}
             {"type":"switch","label":"Show first contact safety tip","name":"standards.AntiPhishPolicy.EnableFirstContactSafetyTips","defaultValue":true}
@@ -28,13 +29,13 @@ function Invoke-CIPPStandardAntiPhishPolicy {
             {"type":"switch","label":"Show domain impersonation safety tip","name":"standards.AntiPhishPolicy.EnableSimilarDomainsSafetyTips","defaultValue":true}
             {"type":"switch","label":"Show user impersonation unusual characters safety tip","name":"standards.AntiPhishPolicy.EnableUnusualCharactersSafetyTips","defaultValue":true}
             {"type":"select","multiple":false,"label":"If the message is detected as spoof by spoof intelligence","name":"standards.AntiPhishPolicy.AuthenticationFailAction","options":[{"label":"Quarantine the message","value":"Quarantine"},{"label":"Move to Junk Folder","value":"MoveToJmf"}]}
-            {"type":"select","multiple":false,"label":"Quarantine policy for Spoof","name":"standards.AntiPhishPolicy.SpoofQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
+            {"type":"select","multiple":false,"creatable":true,"label":"Quarantine policy for Spoof","name":"standards.AntiPhishPolicy.SpoofQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
             {"type":"select","multiple":false,"label":"If a message is detected as user impersonation","name":"standards.AntiPhishPolicy.TargetedUserProtectionAction","options":[{"label":"Move to Junk Folder","value":"MoveToJmf"},{"label":"Delete the message before its delivered","value":"Delete"},{"label":"Quarantine the message","value":"Quarantine"}]}
-            {"type":"select","multiple":false,"label":"Quarantine policy for user impersonation","name":"standards.AntiPhishPolicy.TargetedUserQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
+            {"type":"select","multiple":false,"creatable":true,"label":"Quarantine policy for user impersonation","name":"standards.AntiPhishPolicy.TargetedUserQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
             {"type":"select","multiple":false,"label":"If a message is detected as domain impersonation","name":"standards.AntiPhishPolicy.TargetedDomainProtectionAction","options":[{"label":"Move to Junk Folder","value":"MoveToJmf"},{"label":"Delete the message before its delivered","value":"Delete"},{"label":"Quarantine the message","value":"Quarantine"}]}
-            {"type":"select","multiple":false,"label":"Quarantine policy for domain impersonation","name":"standards.AntiPhishPolicy.TargetedDomainQuarantineTag","options":[{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"},{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"}]}
+            {"type":"select","multiple":false,"creatable":true,"label":"Quarantine policy for domain impersonation","name":"standards.AntiPhishPolicy.TargetedDomainQuarantineTag","options":[{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"},{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"}]}
             {"type":"select","multiple":false,"label":"If Mailbox Intelligence detects an impersonated user","name":"standards.AntiPhishPolicy.MailboxIntelligenceProtectionAction","options":[{"label":"Move to Junk Folder","value":"MoveToJmf"},{"label":"Delete the message before its delivered","value":"Delete"},{"label":"Quarantine the message","value":"Quarantine"}]}
-            {"type":"select","multiple":false,"label":"Apply quarantine policy","name":"standards.AntiPhishPolicy.MailboxIntelligenceQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
+            {"type":"select","multiple":false,"creatable":true,"label":"Apply quarantine policy","name":"standards.AntiPhishPolicy.MailboxIntelligenceQuarantineTag","options":[{"label":"AdminOnlyAccessPolicy","value":"AdminOnlyAccessPolicy"},{"label":"DefaultFullAccessPolicy","value":"DefaultFullAccessPolicy"},{"label":"DefaultFullAccessWithNotificationPolicy","value":"DefaultFullAccessWithNotificationPolicy"}]}
         IMPACT
             Low Impact
         ADDEDDATE
@@ -46,10 +47,16 @@ function Invoke-CIPPStandardAntiPhishPolicy {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/defender-standards#low-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
+    $TestResult = Test-CIPPStandardLicense -StandardName 'AntiPhishPolicy' -TenantFilter $Tenant -RequiredCapabilities @('EXCHANGE_S_STANDARD', 'EXCHANGE_S_ENTERPRISE', 'EXCHANGE_S_STANDARD_GOV', 'EXCHANGE_S_ENTERPRISE_GOV', 'EXCHANGE_LITE') #No Foundation because that does not allow powershell access
+
+    if ($TestResult -eq $false) {
+        Write-Host "We're exiting as the correct license is not present for this standard."
+        return $true
+    } #we're done.
     ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'AntiPhishPolicy'
 
     $ServicePlans = New-GraphGetRequest -uri 'https://graph.microsoft.com/beta/subscribedSkus?$select=servicePlans' -tenantid $Tenant
@@ -57,23 +64,31 @@ function Invoke-CIPPStandardAntiPhishPolicy {
     $MDOLicensed = $ServicePlans -contains "ATP_ENTERPRISE"
     Write-Information "MDOLicensed: $MDOLicensed"
 
-    $PolicyList = @('CIPP Default Anti-Phishing Policy','Default Anti-Phishing Policy')
-    $ExistingPolicy = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-AntiPhishPolicy' | Where-Object -Property Name -In $PolicyList
+    # Use custom name if provided, otherwise use default for backward compatibility
+    $PolicyName = if ($Settings.name) { $Settings.name } else { 'CIPP Default Anti-Phishing Policy' }
+    $PolicyList = @($PolicyName, 'CIPP Default Anti-Phishing Policy','Default Anti-Phishing Policy')
+    $ExistingPolicy = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-AntiPhishPolicy' | Where-Object -Property Name -In $PolicyList | Select-Object -First 1
     if ($null -eq $ExistingPolicy.Name) {
-        $PolicyName = $PolicyList[0]
+        # No existing policy - use the configured/default name
+        $PolicyName = if ($Settings.name) { $Settings.name } else { 'CIPP Default Anti-Phishing Policy' }
     } else {
+        # Use existing policy name if found
         $PolicyName = $ExistingPolicy.Name
     }
-    $RuleList = @( 'CIPP Default Anti-Phishing Rule','CIPP Default Anti-Phishing Policy')
-    $ExistingRule = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-AntiPhishRule' | Where-Object -Property Name -In $RuleList
+    # Derive rule name from policy name, but check for old names for backward compatibility
+    $DesiredRuleName = "$PolicyName Rule"
+    $RuleList = @($DesiredRuleName, 'CIPP Default Anti-Phishing Rule','CIPP Default Anti-Phishing Policy')
+    $ExistingRule = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-AntiPhishRule' | Where-Object -Property Name -In $RuleList | Select-Object -First 1
     if ($null -eq $ExistingRule.Name) {
-        $RuleName = $RuleList[0]
+        # No existing rule - use the derived name
+        $RuleName = $DesiredRuleName
     } else {
+        # Use existing rule name if found
         $RuleName = $ExistingRule.Name
     }
 
     $CurrentState = $ExistingPolicy |
-        Select-Object Name, Enabled, PhishThresholdLevel, EnableMailboxIntelligence, EnableMailboxIntelligenceProtection, EnableSpoofIntelligence, EnableFirstContactSafetyTips, EnableSimilarUsersSafetyTips, EnableSimilarDomainsSafetyTips, EnableUnusualCharactersSafetyTips, EnableUnauthenticatedSender, EnableViaTag, AuthenticationFailAction, SpoofQuarantineTag, MailboxIntelligenceProtectionAction, MailboxIntelligenceQuarantineTag, TargetedUserProtectionAction, TargetedUserQuarantineTag, TargetedDomainProtectionAction, TargetedDomainQuarantineTag, EnableOrganizationDomainsProtection
+        Select-Object Name, Enabled, PhishThresholdLevel, EnableMailboxIntelligence, EnableMailboxIntelligenceProtection, EnableSpoofIntelligence, EnableFirstContactSafetyTips, EnableSimilarUsersSafetyTips, EnableSimilarDomainsSafetyTips, EnableUnusualCharactersSafetyTips, EnableUnauthenticatedSender, EnableViaTag, AuthenticationFailAction, SpoofQuarantineTag, MailboxIntelligenceProtectionAction, MailboxIntelligenceQuarantineTag, TargetedUserProtectionAction, TargetedUserQuarantineTag, TargetedDomainProtectionAction, TargetedDomainQuarantineTag, EnableOrganizationDomainsProtection, EnableTargetedDomainsProtection, EnableTargetedUserProtection
 
     if ($MDOLicensed) {
         $StateIsCorrect = ($CurrentState.Name -eq $PolicyName) -and
@@ -96,6 +111,8 @@ function Invoke-CIPPStandardAntiPhishPolicy {
                           ($CurrentState.TargetedUserQuarantineTag -eq $Settings.TargetedUserQuarantineTag) -and
                           ($CurrentState.TargetedDomainProtectionAction -eq $Settings.TargetedDomainProtectionAction) -and
                           ($CurrentState.TargetedDomainQuarantineTag -eq $Settings.TargetedDomainQuarantineTag) -and
+                          ($CurrentState.EnableTargetedDomainsProtection -eq $true) -and
+                          ($CurrentState.EnableTargetedUserProtection -eq $true) -and
                           ($CurrentState.EnableOrganizationDomainsProtection -eq $true)
     } else {
         $StateIsCorrect = ($CurrentState.Name -eq $PolicyName) -and
@@ -144,6 +161,8 @@ function Invoke-CIPPStandardAntiPhishPolicy {
                     TargetedUserQuarantineTag           = $Settings.TargetedUserQuarantineTag
                     TargetedDomainProtectionAction      = $Settings.TargetedDomainProtectionAction
                     TargetedDomainQuarantineTag         = $Settings.TargetedDomainQuarantineTag
+                    EnableTargetedDomainsProtection     = $true
+                    EnableTargetedUserProtection        = $true
                     EnableOrganizationDomainsProtection = $true
                 }
             } else {
@@ -218,8 +237,9 @@ function Invoke-CIPPStandardAntiPhishPolicy {
     }
 
     if ($Settings.report -eq $true) {
-        Set-CIPPStandardsCompareField -FieldName 'standards.AntiPhishPolicy' -FieldValue $StateIsCorrect -TenantFilter $tenant
-        Add-CIPPBPAField -FieldName 'AntiPhishPolicy' -FieldValue $StateIsCorrect -StoreAs bool -Tenant $tenant
+        $FieldValue = $StateIsCorrect ? $true : $CurrentState
+        Set-CIPPStandardsCompareField -FieldName 'standards.AntiPhishPolicy' -FieldValue $FieldValue -TenantFilter $Tenant
+        Add-CIPPBPAField -FieldName 'AntiPhishPolicy' -FieldValue $StateIsCorrect -StoreAs bool -Tenant $Tenant
     }
 
 }

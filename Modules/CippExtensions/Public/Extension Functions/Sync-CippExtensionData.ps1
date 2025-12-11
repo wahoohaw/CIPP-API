@@ -217,7 +217,7 @@ function Sync-CippExtensionData {
             try {
                 $TenantResults = New-GraphBulkRequest -Requests @($TenantRequests) -tenantid $TenantFilter
             } catch {
-                Throw "Failed to fetch bulk company data: $_"
+                throw "Failed to fetch bulk company data: $_"
             }
 
             $TenantResults | Select-Object id, body | ForEach-Object {
@@ -226,6 +226,15 @@ function Sync-CippExtensionData {
                     # base64 decode
                     $Data = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Data)) | ConvertFrom-Json
                     $Data = $Data.Value
+                }
+
+                # Filter out excluded licenses to respect the ExcludedLicenses table
+                if ($_.id -eq 'Licenses') {
+                    $LicenseTable = Get-CIPPTable -TableName ExcludedLicenses
+                    $ExcludedSkuList = Get-CIPPAzDataTableEntity @LicenseTable
+                    if ($ExcludedSkuList) {
+                        $Data = $Data | Where-Object { $_.skuId -notin $ExcludedSkuList.GUID }
+                    }
                 }
 
                 $Entity = @{
@@ -302,7 +311,6 @@ function Sync-CippExtensionData {
             }
         }
 
-
         $LastSync.LastSync = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         $LastSync.Status = 'Completed'
         $LastSync.Error = ''
@@ -313,4 +321,5 @@ function Sync-CippExtensionData {
     } finally {
         Add-CIPPAzDataTableEntity @Table -Entity $LastSync -Force
     }
+    return $LastSync
 }

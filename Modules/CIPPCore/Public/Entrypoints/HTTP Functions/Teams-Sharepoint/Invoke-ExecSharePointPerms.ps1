@@ -1,5 +1,3 @@
-using namespace System.Net
-
 Function Invoke-ExecSharePointPerms {
     <#
     .FUNCTIONALITY
@@ -11,10 +9,10 @@ Function Invoke-ExecSharePointPerms {
     param($Request, $TriggerMetadata)
 
     $APIName = $Request.Params.CIPPEndpoint
-    $tenantFilter = $Request.Body.tenantFilter
     $Headers = $Request.Headers
-
     Write-LogMessage -Headers $Headers -API $APIName -message 'Accessed this API' -Sev Debug
+
+    $TenantFilter = $Request.Body.tenantFilter
 
     Write-Host '===================================='
     Write-Host 'Request Body:'
@@ -31,7 +29,7 @@ Function Invoke-ExecSharePointPerms {
 
     try {
 
-        $State = Set-CIPPSharePointPerms -tenantFilter $tenantFilter `
+        $State = Set-CIPPSharePointPerms -tenantFilter $TenantFilter `
             -UserId $UserId `
             -OnedriveAccessUser $OnedriveAccessUser `
             -Headers $Headers `
@@ -41,13 +39,12 @@ Function Invoke-ExecSharePointPerms {
         $Result = "$State"
         $StatusCode = [HttpStatusCode]::OK
     } catch {
-        $ErrorMessage = Get-CippException -Exception $_
-        $Result = "Failed. $($ErrorMessage.NormalizedError)"
+        $ErrorMessage = $_.Exception.Message
+        $Result = "Failed. Error: $ErrorMessage"
         $StatusCode = [HttpStatusCode]::BadRequest
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = $StatusCode
             Body       = @{'Results' = $Result }
         })

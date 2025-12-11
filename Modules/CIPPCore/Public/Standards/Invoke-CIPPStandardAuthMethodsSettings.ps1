@@ -13,6 +13,11 @@ function Invoke-CIPPStandardAuthMethodsSettings {
         CAT
             Entra (AAD) Standards
         TAG
+            "EIDSCA.AG01"
+            "EIDSCA.AG02"
+            "EIDSCA.AG03"
+        EXECUTIVETEXT
+            Configures security settings that allow users to report suspicious login attempts and manages how the system handles authentication credentials. This enhances overall security by enabling early detection of potential security threats and optimizing authentication processes.
         ADDEDCOMPONENT
             {"type":"autoComplete","multiple":false,"creatable":false,"required":false,"name":"standards.AuthMethodsSettings.ReportSuspiciousActivity","label":"Report Suspicious Activity Settings","options":[{"label":"Microsoft managed","value":"default"},{"label":"Enabled","value":"enabled"},{"label":"Disabled","value":"disabled"}]}
             {"type":"autoComplete","multiple":false,"creatable":false,"required":false,"name":"standards.AuthMethodsSettings.SystemCredential","label":"System Credential Preferences","options":[{"label":"Microsoft managed","value":"default"},{"label":"Enabled","value":"enabled"},{"label":"Disabled","value":"disabled"}]}
@@ -26,7 +31,7 @@ function Invoke-CIPPStandardAuthMethodsSettings {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#low-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)

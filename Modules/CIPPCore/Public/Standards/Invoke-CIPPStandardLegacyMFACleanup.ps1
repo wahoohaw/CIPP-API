@@ -13,6 +13,8 @@ function Invoke-CIPPStandardLegacyMFACleanup {
         CAT
             Entra (AAD) Standards
         TAG
+        EXECUTIVETEXT
+            This standard is currently non-functional and should be disabled. It was previously designed to remove outdated multi-factor authentication configurations in favor of modern security policies.
         ADDEDCOMPONENT
         IMPACT
             Medium Impact
@@ -24,7 +26,7 @@ function Invoke-CIPPStandardLegacyMFACleanup {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#medium-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)

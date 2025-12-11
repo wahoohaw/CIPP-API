@@ -13,9 +13,10 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
         CAT
             Teams Standards
         TAG
+        EXECUTIVETEXT
+            Configures how the organization federates with external organizations for Teams communication, controlling whether employees can communicate with specific external domains or all external organizations. This setting enables secure inter-organizational collaboration while maintaining control over external communications.
         ADDEDCOMPONENT
             {"type":"switch","name":"standards.TeamsFederationConfiguration.AllowTeamsConsumer","label":"Allow users to communicate with other organizations"}
-            {"type":"switch","name":"standards.TeamsFederationConfiguration.AllowPublicUsers","label":"Allow users to communicate with Skype Users"}
             {"type":"autoComplete","required":true,"multiple":false,"creatable":false,"name":"standards.TeamsFederationConfiguration.DomainControl","label":"Communication Mode","options":[{"label":"Allow all external domains","value":"AllowAllExternal"},{"label":"Block all external domains","value":"BlockAllExternal"},{"label":"Allow specific external domains","value":"AllowSpecificExternal"},{"label":"Block specific external domains","value":"BlockSpecificExternal"}]}
             {"type":"textField","name":"standards.TeamsFederationConfiguration.DomainList","label":"Domains, Comma separated","required":false}
         IMPACT
@@ -28,13 +29,27 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/teams-standards#medium-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
+    $TestResult = Test-CIPPStandardLicense -StandardName 'TeamsFederationConfiguration' -TenantFilter $Tenant -RequiredCapabilities @('MCOSTANDARD', 'MCOEV', 'MCOIMP', 'TEAMS1','Teams_Room_Standard')
     ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'TeamsFederationConfiguration'
 
-    $CurrentState = New-TeamsRequest -TenantFilter $Tenant -Cmdlet 'Get-CsTenantFederationConfiguration' -CmdParams @{Identity = 'Global' } | Select-Object *
+    if ($TestResult -eq $false) {
+        Write-Host "We're exiting as the correct license is not present for this standard."
+        return $true
+    } #we're done.
+
+    try {
+        $CurrentState = New-TeamsRequest -TenantFilter $Tenant -Cmdlet 'Get-CsTenantFederationConfiguration' -CmdParams @{Identity = 'Global' } |
+        Select-Object *
+    }
+    catch {
+        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get the TeamsFederationConfiguration state for $Tenant. Error: $ErrorMessage" -Sev Error
+        return
+    }
 
     $AllowAllKnownDomains = New-CsEdgeAllowAllKnownDomains
     $DomainControl = $Settings.DomainControl.value ?? $Settings.DomainControl
@@ -87,7 +102,6 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
     $BlockedDomainsMatches = -not (Compare-Object -ReferenceObject $BlockedDomains -DifferenceObject $CurrentState.BlockedDomains)
 
     $StateIsCorrect = ($CurrentState.AllowTeamsConsumer -eq $Settings.AllowTeamsConsumer) -and
-    ($CurrentState.AllowPublicUsers -eq $Settings.AllowPublicUsers) -and
     ($CurrentState.AllowFederatedUsers -eq $AllowFederatedUsers) -and
     $AllowedDomainsMatches -and
     $BlockedDomainsMatches
@@ -99,7 +113,6 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
             $cmdParams = @{
                 Identity            = 'Global'
                 AllowTeamsConsumer  = $Settings.AllowTeamsConsumer
-                AllowPublicUsers    = $Settings.AllowPublicUsers
                 AllowFederatedUsers = $AllowFederatedUsers
                 BlockedDomains      = $BlockedDomains
             }
@@ -134,7 +147,7 @@ function Invoke-CIPPStandardTeamsFederationConfiguration {
         if ($StateIsCorrect -eq $true) {
             $FieldValue = $true
         } else {
-            $FieldValue = $CurrentState
+            $FieldValue = $CurrentState | Select-Object AllowTeamsConsumer, AllowFederatedUsers, AllowedDomains, BlockedDomains
         }
         Set-CIPPStandardsCompareField -FieldName 'standards.TeamsFederationConfiguration' -FieldValue $FieldValue -Tenant $Tenant
     }

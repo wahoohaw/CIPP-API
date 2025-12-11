@@ -7,9 +7,10 @@ function Invoke-AddTenant {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
+    $Headers = $Request.Headers
 
-    $APIName = $Request.Params.CIPPEndpoint
-    Write-LogMessage -headers $Request.Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
+
+    # Interact with query parameters or the body of the request.
     $Action = $Request.Body.Action ?? $Request.Query.Action
     $TenantName = $Request.Body.TenantName ?? $Request.Query.TenantName
     $StatusCode = [HttpStatusCode]::OK
@@ -199,7 +200,7 @@ function Invoke-AddTenant {
         }
     }
 
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = $StatusCode
             Body       = $Body
         })

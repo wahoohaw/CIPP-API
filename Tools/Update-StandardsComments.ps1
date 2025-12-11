@@ -106,12 +106,10 @@ foreach ($Standard in $StandardsInfo) {
                             $NewComment.Add("           $(ConvertTo-Json -InputObject $Value -Depth 5 -Compress)`n")
                         }
                         continue
-                    }
-                    elseif ($Property.Value -is [System.Management.Automation.PSCustomObject]) {
+                    } elseif ($Property.Value -is [System.Management.Automation.PSCustomObject]) {
                         $NewComment.Add("           $(ConvertTo-Json -InputObject $Property.Value -Depth 5 -Compress)`n")
                         continue
-                    }
-                    else {
+                    } else {
                         if ($null -ne $Property.Value) {
                             $NewComment.Add("           $(EscapeMarkdown($Property.Value.ToString()))`n")
                         }
@@ -126,23 +124,7 @@ foreach ($Standard in $StandardsInfo) {
         $NewComment.Add("           Run the Tools\Update-StandardsComments.ps1 script to update this comment block`n")
         # -Online help link
         $NewComment.Add("   .LINK`n")
-        $DocsLink = 'https://docs.cipp.app/user-documentation/tenant/standards/list-standards/'
-
-        switch ($Standard.cat) {
-            'Global Standards' { $DocsLink += 'global-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'Entra (AAD) Standards' { $DocsLink += 'entra-aad-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'Exchange Standards' { $DocsLink += 'exchange-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'Defender Standards' { $DocsLink += 'defender-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'Intune Standards' { $DocsLink += 'intune-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'SharePoint Standards' { $DocsLink += 'sharepoint-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            'Teams Standards' { $DocsLink += 'teams-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
-            Default {}
-        }
-
-        switch ($Standard.impact) {
-            condition {  }
-            Default {}
-        }
+        $DocsLink = 'https://docs.cipp.app/user-documentation/tenant/standards/list-standards'
 
         $NewComment.Add("       $DocsLink`n")
         $NewComment.Add('   #>')

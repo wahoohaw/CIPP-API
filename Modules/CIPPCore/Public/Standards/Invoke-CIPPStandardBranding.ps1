@@ -13,6 +13,8 @@ function Invoke-CIPPStandardBranding {
         CAT
             Global Standards
         TAG
+        EXECUTIVETEXT
+            Customizes Microsoft 365 login pages and portals with company branding, including logos, colors, and messaging. This creates a consistent corporate identity experience for employees and reinforces brand recognition while maintaining professional appearance across all Microsoft services.
         ADDEDCOMPONENT
             {"type":"textField","name":"standards.Branding.signInPageText","label":"Sign-in page text","required":false}
             {"type":"textField","name":"standards.Branding.usernameHintText","label":"Username hint Text","required":false}
@@ -30,7 +32,7 @@ function Invoke-CIPPStandardBranding {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/global-standards#low-impact
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
 
     param($Tenant, $Settings)
@@ -38,24 +40,55 @@ function Invoke-CIPPStandardBranding {
 
     $TenantId = Get-Tenants | Where-Object -Property defaultDomainName -EQ $Tenant
 
-    try {
-        $CurrentState = New-GraphGetRequest -Uri "https://graph.microsoft.com/beta/organization/$($TenantId.customerId)/branding/localizations/0" -tenantID $Tenant -AsApp $true
-    } catch {
-        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
-        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get the branding for $Tenant. This tenant might not have premium licenses available: $ErrorMessage" -Sev Error
-    }
-
+    $Localizations = New-GraphGetRequest -Uri "https://graph.microsoft.com/beta/organization/$($TenantId.customerId)/branding/localizations" -tenantID $Tenant -AsApp $true
     # Get layoutTemplateType value using null-coalescing operator
     $layoutTemplateType = $Settings.layoutTemplateType.value ?? $Settings.layoutTemplateType
+    # If default localization (id "0") exists, use that to get the currentState. Otherwise we have to create it first.
+    if ($Localizations | Where-Object { $_.id -eq '0' }) {
+        try {
+            $CurrentState = New-GraphGetRequest -Uri "https://graph.microsoft.com/beta/organization/$($TenantId.customerId)/branding/localizations/0" -tenantID $Tenant -AsApp $true
+        } catch {
+            $ErrorMessage = Get-CippException -Exception $_
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get the Branding state for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
+            return
+        }
+    } else {
+        try {
+            $GraphRequest = @{
+                tenantID    = $Tenant
+                uri         = "https://graph.microsoft.com/beta/organization/$($TenantId.customerId)/branding/localizations"
+                AsApp       = $true
+                Type        = 'POST'
+                ContentType = 'application/json; charset=utf-8'
+                Body        = [pscustomobject]@{
+                    signInPageText                  = $Settings.signInPageText
+                    usernameHintText                = $Settings.usernameHintText
+                    loginPageTextVisibilitySettings = [pscustomobject]@{
+                        hideAccountResetCredentials = $Settings.hideAccountResetCredentials
+                    }
+                    loginPageLayoutConfiguration    = [pscustomobject]@{
+                        layoutTemplateType = $layoutTemplateType
+                        isHeaderShown      = $Settings.isHeaderShown
+                        isFooterShown      = $Settings.isFooterShown
+                    }
+                } | ConvertTo-Json -Compress
+            }
+            $CurrentState = New-GraphPostRequest @GraphRequest
+        } catch {
+            $ErrorMessage = Get-CippException -Exception $_
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not create the default Branding localization for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
+            return
+        }
+    }
 
     $StateIsCorrect = ($CurrentState.signInPageText -eq $Settings.signInPageText) -and
-                        ($CurrentState.usernameHintText -eq $Settings.usernameHintText) -and
-                        ($CurrentState.loginPageTextVisibilitySettings.hideAccountResetCredentials -eq $Settings.hideAccountResetCredentials) -and
-                        ($CurrentState.loginPageLayoutConfiguration.layoutTemplateType -eq $layoutTemplateType) -and
-                        ($CurrentState.loginPageLayoutConfiguration.isHeaderShown -eq $Settings.isHeaderShown) -and
-                        ($CurrentState.loginPageLayoutConfiguration.isFooterShown -eq $Settings.isFooterShown)
+    ($CurrentState.usernameHintText -eq $Settings.usernameHintText) -and
+    ($CurrentState.loginPageTextVisibilitySettings.hideAccountResetCredentials -eq $Settings.hideAccountResetCredentials) -and
+    ($CurrentState.loginPageLayoutConfiguration.layoutTemplateType -eq $layoutTemplateType) -and
+    ($CurrentState.loginPageLayoutConfiguration.isHeaderShown -eq $Settings.isHeaderShown) -and
+    ($CurrentState.loginPageLayoutConfiguration.isFooterShown -eq $Settings.isFooterShown)
 
-    If ($Settings.remediate -eq $true) {
+    if ($Settings.remediate -eq $true) {
         if ($StateIsCorrect -eq $true) {
             Write-LogMessage -API 'Standards' -Tenant $Tenant -Message 'Branding is already applied correctly.' -Sev Info
         } else {
@@ -89,7 +122,7 @@ function Invoke-CIPPStandardBranding {
 
     }
 
-    If ($Settings.alert -eq $true) {
+    if ($Settings.alert -eq $true) {
 
         if ($StateIsCorrect -eq $true) {
             Write-LogMessage -API 'Standards' -Tenant $Tenant -Message 'Branding is correctly set.' -Sev Info
@@ -99,7 +132,7 @@ function Invoke-CIPPStandardBranding {
         }
     }
 
-    If ($Settings.report -eq $true) {
+    if ($Settings.report -eq $true) {
         $state = $StateIsCorrect -eq $true ? $true : ($CurrentState | Select-Object -Property signInPageText, usernameHintText, loginPageTextVisibilitySettings, loginPageLayoutConfiguration)
         Set-CIPPStandardsCompareField -FieldName 'standards.Branding' -FieldValue $state -TenantFilter $Tenant
         Add-CIPPBPAField -FieldName 'Branding' -FieldValue [bool]$StateIsCorrect -StoreAs bool -Tenant $Tenant

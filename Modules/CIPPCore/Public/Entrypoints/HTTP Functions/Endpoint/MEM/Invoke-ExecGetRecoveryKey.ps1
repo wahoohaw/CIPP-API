@@ -1,6 +1,4 @@
-using namespace System.Net
-
-Function Invoke-ExecGetRecoveryKey {
+function Invoke-ExecGetRecoveryKey {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -12,22 +10,26 @@ Function Invoke-ExecGetRecoveryKey {
 
     $APIName = $Request.Params.CIPPEndpoint
     $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
+
 
     # Interact with query parameters or the body of the request.
     $TenantFilter = $Request.Query.tenantFilter ?? $Request.Body.tenantFilter
     $GUID = $Request.Query.GUID ?? $Request.Body.GUID
+    $RecoveryKeyType = $Request.Body.RecoveryKeyType ?? 'BitLocker'
 
     try {
-        $Result = Get-CIPPBitLockerKey -device $GUID -tenantFilter $TenantFilter -APIName $APIName -Headers $Headers
+        switch ($RecoveryKeyType) {
+            'BitLocker' { $Result = Get-CIPPBitLockerKey -Device $GUID -TenantFilter $TenantFilter -APIName $APIName -Headers $Headers }
+            'FileVault' { $Result = Get-CIPPFileVaultKey -Device $GUID -TenantFilter $TenantFilter -APIName $APIName -Headers $Headers }
+            default { throw "Invalid RecoveryKeyType specified: $RecoveryKeyType." }
+        }
         $StatusCode = [HttpStatusCode]::OK
     } catch {
         $Result = $_.Exception.Message
         $StatusCode = [HttpStatusCode]::InternalServerError
     }
 
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = $StatusCode
             Body       = @{Results = $Result }
         })

@@ -3,7 +3,7 @@ function Write-LogMessage {
     .FUNCTIONALITY
     Internal
     #>
-    Param(
+    param(
         $message,
         $tenant = 'None',
         $API = 'None',
@@ -51,7 +51,7 @@ function Write-LogMessage {
         'Message'      = [string]$message
         'Username'     = [string]$username
         'Severity'     = [string]$sev
-        'SentAsAlert'  = $false
+        'sentAsAlert'  = $false
         'PartitionKey' = [string]$PartitionKey
         'RowKey'       = [string]([guid]::NewGuid()).ToString()
         'FunctionNode' = [string]$env:WEBSITE_SITE_NAME
@@ -65,6 +65,19 @@ function Write-LogMessage {
     }
     if ($tenantId) {
         $TableRow.Add('TenantID', [string]$tenantId)
+    }
+    if ($script:StandardInfo) {
+        $TableRow.Standard = [string]$script:StandardInfo.Standard
+        $TableRow.StandardTemplateId = [string]$script:StandardInfo.StandardTemplateId
+        if ($script:StandardInfo.IntuneTemplateId) {
+            $TableRow.IntuneTemplateId = [string]$script:StandardInfo.IntuneTemplateId
+        }
+        if ($script:StandardInfo.ConditionalAccessTemplateId) {
+            $TableRow.ConditionalAccessTemplateId = [string]$script:StandardInfo.ConditionalAccessTemplateId
+        }
+    }
+    if ($script:ScheduledTaskId) {
+        $TableRow.ScheduledTaskId = [string]$script:ScheduledTaskId
     }
 
     $Table.Entity = $TableRow

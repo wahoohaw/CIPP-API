@@ -1,5 +1,3 @@
-using namespace System.Net
-
 Function Invoke-ListUsers {
     <#
     .FUNCTIONALITY
@@ -9,14 +7,9 @@ Function Invoke-ListUsers {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
-
-    $APIName = $Request.Params.CIPPEndpoint
-    $Headers = $Request.Headers
-    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
-
     $ConvertTable = Import-Csv ConversionTable.csv | Sort-Object -Property 'guid' -Unique
     # Interact with query parameters or the body of the request.
-    $TenantFilter = $Request.Query.TenantFilter
+    $TenantFilter = $Request.Query.tenantFilter
     $GraphFilter = $Request.Query.graphFilter
     $userid = $Request.Query.UserID
 
@@ -26,7 +19,7 @@ Function Invoke-ListUsers {
             $_ | Add-Member -MemberType NoteProperty -Name 'username' -Value ($_.userPrincipalName -split '@' | Select-Object -First 1) -Force
             $_ | Add-Member -MemberType NoteProperty -Name 'Aliases' -Value ($_.ProxyAddresses -join ', ') -Force
             $SkuID = $_.AssignedLicenses.skuid
-            $_ | Add-Member -MemberType NoteProperty -Name 'LicJoined' -Value (($ConvertTable | Where-Object { $_.guid -in $skuid }).'Product_Display_Name' -join ', ') -Force
+            $_ | Add-Member -MemberType NoteProperty -Name 'LicJoined' -Value (($ConvertTable | Where-Object { $_.guid -in $SkuID }).'Product_Display_Name' -join ', ') -Force
             $_ | Add-Member -MemberType NoteProperty -Name 'primDomain' -Value @{value = ($_.userPrincipalName -split '@' | Select-Object -Last 1); label = ($_.userPrincipalName -split '@' | Select-Object -Last 1); } -Force
             $_
         }
@@ -78,8 +71,7 @@ Function Invoke-ListUsers {
         @{ Name = 'LastSigninResult'; Expression = { $LastSignIn.status } },
         @{ Name = 'LastSigninFailureReason'; Expression = { if ($LastSignIn.Id -eq 0) { 'Successfully signed in' } else { $LastSignIn.Id } } }
     }
-    # Associate values to output bindings by calling 'Push-OutputBinding'.
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = @($GraphRequest)
         })
