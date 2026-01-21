@@ -17,7 +17,7 @@ function Test-CIPPAccess {
         $CIPPCoreModule = Get-Module -Name CIPPCore
         if ($CIPPCoreModule) {
             $PermissionsFileJson = Join-Path $CIPPCoreModule.ModuleBase 'lib' 'data' 'function-permissions.json'
-            
+
             if (Test-Path $PermissionsFileJson) {
                 try {
                     $jsonData = Get-Content -Path $PermissionsFileJson -Raw | ConvertFrom-Json -AsHashtable
@@ -25,7 +25,7 @@ function Test-CIPPAccess {
                     foreach ($key in $jsonData.Keys) {
                         $global:CIPPFunctionPermissions[$key] = $jsonData[$key]
                     }
-                    Write-Information "Loaded $($global:CIPPFunctionPermissions.Count) function permissions from JSON cache"
+                    Write-Debug "Loaded $($global:CIPPFunctionPermissions.Count) function permissions from JSON cache"
                 } catch {
                     Write-Warning "Failed to load function permissions from JSON: $($_.Exception.Message)"
                 }
@@ -41,13 +41,13 @@ function Test-CIPPAccess {
             $PermissionData = $global:CIPPFunctionPermissions[$FunctionName]
             $APIRole = $PermissionData['Role']
             $Functionality = $PermissionData['Functionality']
-            Write-Information "Loaded function permission data from cache for '$FunctionName': Role='$APIRole', Functionality='$Functionality'"
+            Write-Debug "Loaded function permission data from cache for '$FunctionName': Role='$APIRole', Functionality='$Functionality'"
         } else {
             try {
                 $Help = Get-Help $FunctionName -ErrorAction Stop
                 $APIRole = $Help.Role
                 $Functionality = $Help.Functionality
-                Write-Information "Loaded function permission data via Get-Help for '$FunctionName': Role='$APIRole', Functionality='$Functionality'"
+                Write-Debug "Loaded function permission data via Get-Help for '$FunctionName': Role='$APIRole', Functionality='$Functionality'"
             } catch {
                 Write-Warning "Function '$FunctionName' not found"
             }
@@ -148,8 +148,35 @@ function Test-CIPPAccess {
             $AccessTimings['ResolveUserRoles'] = $swResolveUserRoles.Elapsed.TotalMilliseconds
         }
 
-        #Write-Information ($User | ConvertTo-Json -Depth 5)
-        # Return user permissions
+        $swIPCheck = [System.Diagnostics.Stopwatch]::StartNew()
+        $AllowedIPRanges = Get-CIPPRoleIPRanges -Roles $User.userRoles
+
+        if ($AllowedIPRanges -notcontains 'Any') {
+            $ForwardedFor = $Request.Headers.'x-forwarded-for' -split ',' | Select-Object -First 1
+            $IPRegex = '^(?<IP>(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]|[0-9a-fA-F:]+))(?::\d+)?$'
+            $IPAddress = $ForwardedFor -replace $IPRegex, '$1' -replace '[\[\]]', ''
+            if ($IPAddress) {
+                $IPAllowed = $false
+                foreach ($Range in $AllowedIPRanges) {
+                    if ($IPAddress -eq $Range -or (Test-IpInRange -IPAddress $IPAddress -Range $Range)) {
+                        $IPAllowed = $true
+                        break
+                    }
+                }
+
+                if (-not $IPAllowed -and -not $Request.Params.CIPPEndpoint -eq 'me') {
+                    throw "Access to this CIPP API endpoint is not allowed, your IP address ($IPAddress) is not in the allowed range for your role(s)"
+                }
+            } else {
+                $IPAllowed = $true
+            }
+        } else {
+            $IPAllowed = $true
+        }
+
+        $swIPCheck.Stop()
+        $AccessTimings['IPRangeCheck'] = $swIPCheck.Elapsed.TotalMilliseconds
+
         if ($Request.Params.CIPPEndpoint -eq 'me') {
 
             if (!$User.userRoles) {
@@ -159,6 +186,18 @@ function Test-CIPPAccess {
                             @{
                                 'clientPrincipal' = $null
                                 'permissions'     = @()
+                            } | ConvertTo-Json -Depth 5)
+                    })
+            }
+
+            if (!$IPAllowed) {
+                return ([HttpResponseContext]@{
+                        StatusCode = [HttpStatusCode]::OK
+                        Body       = (
+                            @{
+                                'clientPrincipal' = $null
+                                'permissions'     = @()
+                                'message'         = "Your IP address ($IPAddress) is not in the allowed range for your role(s)"
                             } | ConvertTo-Json -Depth 5)
                     })
             }
